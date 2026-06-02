@@ -76,17 +76,26 @@ class TradingAgent:
         return tickers[:limit] if limit else tickers
 
     def _gather(self, tickers: list[str], deep: bool = True) -> list[TickerData]:
-        out: list[TickerData] = []
-        for i, t in enumerate(tickers, 1):
+        """Build TickerData for the universe. Live providers are I/O-bound, so we
+        fan out across a thread pool (each provider rate-limits itself); the
+        in-memory snapshot path stays single-threaded."""
+        def build(t: str) -> TickerData | None:
             try:
                 td = self.md.build(t, deep=deep)
+                return td if td.price else None
             except Exception as e:
                 log.debug("build %s failed: %s", t, e)
-                continue
-            if td.price:
-                out.append(td)
-            if i % 25 == 0:
-                log.info("  gathered %d/%d", i, len(tickers))
+                return None
+
+        workers = int(self.cfg.get("data.max_workers", 8))
+        if workers > 1 and "snapshot" not in self.providers and len(tickers) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                results = list(ex.map(build, tickers))
+        else:
+            results = [build(t) for t in tickers]
+        out = [r for r in results if r is not None]
+        log.info("gathered %d/%d priced names", len(out), len(tickers))
         return out
 
     # ---- scan & score ----

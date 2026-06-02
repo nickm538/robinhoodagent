@@ -156,6 +156,19 @@ class AlphaVantageProvider(DataProvider):
                     out["eps_revision_ratio"] = (up - dn) / (up + dn)
         except Exception:
             pass
+        try:
+            if not OFFLINE:
+                from datetime import date
+                url = (f"{BASE}/query?function=EARNINGS_CALENDAR&symbol={ticker}"
+                       f"&horizon=3month&apikey={self.api_key}")
+                self.http.limiter.wait()
+                txt = self.http.session.get(url, timeout=self.http.timeout).text
+                rows = list(csv.DictReader(io.StringIO(txt)))
+                dates = [pd.to_datetime(r["reportDate"]) for r in rows if r.get("reportDate")]
+                if dates:
+                    out["days_to_next"] = max((min(dates).date() - date.today()).days, 0)
+        except Exception:
+            pass
         if len(out) == 1:
             raise ProviderUnsupported
         return out
