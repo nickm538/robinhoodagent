@@ -24,16 +24,39 @@ from .mcp_client import MCPHttpClient, MCPError
 log = get_logger("broker.rh")
 
 # Ordered regex patterns -> logical capability. First matching tool wins.
+# Official Robinhood Agentic names (*_equity_*) are listed first, then common
+# community-server names as fallbacks.
 _PATTERNS = {
-    "place_order": [r"place_stock_order", r"buy_stock", r"place_order", r"place_trade",
-                    r"submit_order", r"create_order", r"order_stock"],
-    "positions":   [r"get_stock_positions", r"get_positions", r"get_portfolio", r"positions"],
-    "accounts":    [r"get_accounts?$", r"account_profile", r"get_account\b"],
-    "buying_power":[r"buying_power", r"get_account_balance", r"account_profile", r"get_account\b"],
-    "orders":      [r"get_orders", r"recent_stock_orders", r"open_orders", r"order_history"],
-    "cancel":      [r"cancel_stock_order", r"cancel_order", r"cancel"],
-    "quote":       [r"get_stock_quote", r"get_quote\b"],
+    "place_order":  [r"place_equity_order", r"place_stock_order", r"buy_stock",
+                     r"place_order", r"place_trade", r"submit_order", r"create_order"],
+    "review_order": [r"review_equity_order", r"review_order", r"preview_order"],
+    "positions":    [r"get_equity_positions", r"get_stock_positions", r"get_positions", r"positions"],
+    "portfolio":    [r"get_portfolio", r"portfolio"],
+    "accounts":     [r"get_accounts", r"account_profile", r"get_account\b"],
+    "buying_power": [r"get_portfolio", r"buying_power", r"get_account_balance", r"get_accounts"],
+    "orders":       [r"get_equity_orders", r"get_orders", r"recent_stock_orders",
+                     r"open_orders", r"order_history"],
+    "cancel":       [r"cancel_equity_order", r"cancel_stock_order", r"cancel_order", r"cancel"],
+    "quote":        [r"get_equity_quotes", r"get_stock_quote", r"get_quote"],
 }
+
+
+def pick_account_number(raw) -> str | None:
+    """Extract an account number from a get_accounts response, preferring the
+    Agentic account (the only one an agent may trade)."""
+    if isinstance(raw, dict) and raw.get("account_number"):
+        return raw["account_number"]
+    rows = raw if isinstance(raw, list) else (
+        (raw.get("accounts") or raw.get("results") or []) if isinstance(raw, dict) else [])
+    rows = [r for r in rows if isinstance(r, dict)]
+    agentic = [r for r in rows if "agentic" in
+               (str(r.get("type", "")) + str(r.get("brokerage_account_type", ""))
+                + str(r.get("account_type", ""))).lower()]
+    for r in (agentic or rows):
+        num = r.get("account_number") or r.get("account_id") or r.get("id")
+        if num:
+            return str(num)
+    return None
 
 
 def discover_tool_map(names: list[str]) -> dict:

@@ -123,6 +123,15 @@ def cmd_auth(args) -> int:
     return 0
 
 
+def cmd_probe(args) -> int:
+    """Read-only dump of the Robinhood MCP tool schemas + response shapes."""
+    import json
+    cfg = load_config(args.config)
+    from .broker.robinhood_sdk import probe
+    print(json.dumps(probe(cfg.robinhood_url()), indent=2, default=str))
+    return 0
+
+
 def cmd_loop(args) -> int:
     """Run the always-on autonomous agent."""
     from .daemon import AlwaysOnAgent
@@ -145,6 +154,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("auth", help="one-time Robinhood OAuth for the standalone bot")
     s.add_argument("--port", type=int, default=8765, help="localhost OAuth callback port")
     s.set_defaults(func=cmd_auth)
+
+    sub.add_parser("probe", help="read-only dump of Robinhood MCP tool schemas").set_defaults(
+        func=cmd_probe)
     s = sub.add_parser("status"); s.add_argument("--snapshot"); s.set_defaults(func=cmd_status)
 
     s = sub.add_parser("scan")

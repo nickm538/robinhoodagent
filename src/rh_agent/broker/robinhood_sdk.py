@@ -14,7 +14,7 @@ from ..logging_setup import get_logger
 from ..models import Account, Order
 from .base import Broker
 from .oauth import FileTokenStorage, _require_sdk, make_provider
-from .robinhood_mcp import discover_tool_map, order_args, parse_account
+from .robinhood_mcp import discover_tool_map, order_args, parse_account, pick_account_number
 
 log = get_logger("broker.rh_sdk")
 
@@ -75,31 +75,53 @@ class RobinhoodSDKBroker(Broker):
             raise RuntimeError(f"no Robinhood MCP tool for capability '{cap}'")
         return _extract(await session.call_tool(tool, args or {}))
 
+    async def _resolve_account(self, session) -> str | None:
+        """Robinhood requires account_number on calls; fetch it once from
+        get_accounts (preferring the Agentic account)."""
+        if self.account_number:
+            return self.account_number
+        try:
+            accts = await self._call(session, "accounts", {})
+            self.account_number = pick_account_number(accts)
+            if self.account_number:
+                log.info("using Robinhood account %s", self.account_number)
+            else:
+                log.warning("could not determine account_number from get_accounts")
+        except Exception as e:
+            log.warning("account resolve failed: %s", e)
+        return self.account_number
+
     # -- Broker API --
     def get_account(self) -> Account:
         async def fn(session):
-            a = {} if not self.account_number else {"account_number": self.account_number}
+            acct = await self._resolve_account(session)
+            a = {"account_number": acct} if acct else {}
             prof = pos = None
             try:
-                prof = await self._call(session, "buying_power", a)
+                prof = await self._call(session, "buying_power", a)   # -> get_portfolio
             except Exception as e:
-                log.warning("buying_power read failed: %s", e)
+                log.warning("portfolio read failed: %s", e)
             try:
-                pos = await self._call(session, "positions", a)
+                pos = await self._call(session, "positions", a)       # -> get_equity_positions
             except Exception as e:
                 log.warning("positions read failed: %s", e)
-            return parse_account(prof, pos, self.account_number)
+            return parse_account(prof, pos, acct)
         return self._run(fn)
 
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
-        if dry_run:
-            return {"status": "preview", "ticker": order.ticker, "side": order.side,
-                    "qty": order.quantity, "note": "dry_run (not transmitted)"}
-
         async def fn(session):
-            return await self._call(session, "place_order",
-                                    order_args(order, False, self.account_number))
-        return {"status": "submitted", "ticker": order.ticker, "result": self._run(fn)}
+            acct = await self._resolve_account(session)
+            args = order_args(order, dry_run, acct)
+            if dry_run:
+                # validate via the broker's review tool if present (no live order)
+                if (self._map or {}).get("review_order"):
+                    return await self._call(session, "review_order", args)
+                return {"note": "no review tool available; nothing transmitted"}
+            return await self._call(session, "place_order", args)
+
+        detail = self._run(fn)
+        return {"status": "preview" if dry_run else "submitted",
+                "ticker": order.ticker, "result": detail}
 
     def get_orders(self) -> list:
         async def fn(session):
@@ -108,3 +130,68 @@ class RobinhoodSDKBroker(Broker):
             except Exception:
                 return []
         return self._run(fn)
+
+
+def _shape(o, depth: int = 0):
+    """Structure (field names + types) of a value, WITHOUT the actual values —
+    so we can learn response shapes without exposing balances/account numbers."""
+    if depth > 5:
+        return "..."
+    if isinstance(o, dict):
+        return {k: _shape(v, depth + 1) for k, v in list(o.items())[:50]}
+    if isinstance(o, list):
+        return [_shape(o[0], depth + 1)] if o else []
+    return type(o).__name__
+
+
+def probe(url: str, sample_ticker: str = "AAPL") -> dict:
+    """Read-only introspection of the Robinhood MCP: every tool's input schema
+    plus the *shape* of account/portfolio/positions/orders/quote responses.
+    Places NO orders. Run this and share the output to finalise live wiring."""
+    return asyncio.run(_probe(url, sample_ticker))
+
+
+async def _probe(url: str, sample_ticker: str) -> dict:
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    out: dict = {"tools": [], "shapes": {}}
+    provider = make_provider(url, interactive=False)
+    async with streamablehttp_client(url, auth=provider) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tl = await session.list_tools()
+            names = [t.name for t in tl.tools]
+            for t in tl.tools:
+                out["tools"].append({"name": t.name,
+                                     "description": (t.description or "")[:240],
+                                     "input_schema": t.inputSchema})
+            mp = discover_tool_map(names)
+            out["capability_map"] = mp
+
+            async def call(tool, args):
+                return _extract(await session.call_tool(tool, args or {}))
+
+            acct = None
+            if mp.get("accounts"):
+                try:
+                    a = await call(mp["accounts"], {})
+                    out["shapes"]["accounts"] = _shape(a)
+                    acct = pick_account_number(a)
+                    out["account_resolved"] = bool(acct)
+                except Exception as e:
+                    out["shapes"]["accounts_error"] = str(e)
+            args = {"account_number": acct} if acct else {}
+            for cap in ("portfolio", "positions", "orders"):
+                if mp.get(cap):
+                    try:
+                        out["shapes"][cap] = _shape(await call(mp[cap], args))
+                    except Exception as e:
+                        out["shapes"][f"{cap}_error"] = str(e)
+            if mp.get("quote"):
+                try:
+                    out["shapes"]["quote"] = _shape(
+                        await call(mp["quote"], {"symbol": sample_ticker, "symbols": sample_ticker}))
+                except Exception as e:
+                    out["shapes"]["quote_error"] = str(e)
+    return out
