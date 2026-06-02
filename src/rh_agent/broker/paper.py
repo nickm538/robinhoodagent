@@ -59,6 +59,9 @@ class PaperBroker(Broker):
                        account_number="PAPER", source="paper")
 
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
+        if order.side not in ("buy", "sell"):
+            return {"status": "rejected", "reason": f"invalid side {order.side!r}",
+                    "order": order.to_dict()}
         px = self.price_fn(order.ticker)
         if px is None:
             return {"status": "rejected", "reason": "no price", "order": order.to_dict()}
@@ -83,6 +86,9 @@ class PaperBroker(Broker):
             pos["qty"] = new_qty
             self.state["cash"] -= cost
         else:  # sell
+            if pos["qty"] <= 1e-9:
+                return {"status": "rejected", "reason": "no position to sell",
+                        "ticker": order.ticker}
             qty = min(qty, pos["qty"])
             self.state["cash"] += qty * fill
             pos["qty"] -= qty

@@ -85,8 +85,8 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     out: dict = {}
     out["rsi"] = rsi(close)
     out["macd_hist"] = macd_hist(close)
-    out["atr"] = atr(df)
     a = atr(df)
+    out["atr"] = a
     px = float(close.iloc[-1])
     out["atr_pct"] = (a / px) if (a and px) else None
     out["adx"] = adx(df)

@@ -61,6 +61,8 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
             px = price_fn(o.ticker) or 0
             o.quantity = round(o.notional / px, 4) if px else o.quantity
         log.info("turnover cap hit: scaled buys by %.2f", scale)
+        # scaling can push small orders under the minimum — drop those (-> cash)
+        buys = [o for o in buys if (o.notional or 0) >= min_notional]
 
     orders.extend(buys)
     log.info("orders: %d (%d sells, %d buys)", len(orders),

@@ -24,8 +24,8 @@ class RegimeResult:
     def describe(self) -> str:
         s = self.signals
         bits = []
-        if "spx_above_200dma" in s:
-            bits.append(f"SPX {'>' if s['spx_above_200dma'] else '<'} 200dma")
+        if s.get("spx_above_200dma") is not None:
+            bits.append(f"SPX {'uptrend' if s['spx_above_200dma'] else 'downtrend'}")
         if s.get("vix") is not None:
             bits.append(f"VIX {s['vix']:.1f}")
         if s.get("breadth") is not None:
@@ -35,11 +35,11 @@ class RegimeResult:
         return f"{self.name} ({', '.join(bits)}) -> exposure {self.exposure:.0%}"
 
 
-def _trend_above_200(md, symbol="SPY") -> bool | None:
+def _trend_above_200(md, symbol="SPY", lookback: int = 200) -> bool | None:
     df = md.get_index_prices(symbol)
-    if df is None or len(df) < 200:
+    if df is None or len(df) < lookback:
         return None
-    return float(df["close"].iloc[-1]) > float(df["close"].iloc[-200:].mean())
+    return float(df["close"].iloc[-1]) > float(df["close"].iloc[-lookback:].mean())
 
 
 def _vix(md) -> float | None:
@@ -73,7 +73,7 @@ def detect_regime(md, cfg: Config) -> RegimeResult:
     weights = rc.get("weights", {})
     exposure = rc.get("exposure", {})
 
-    above = _trend_above_200(md, "SPY")
+    above = _trend_above_200(md, "SPY", int(sig.get("spx_trend_lookback", 200)))
     vix = _vix(md)
     breadth = _breadth(md)
     macro = md.get_macro()

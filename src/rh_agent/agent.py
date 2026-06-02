@@ -111,16 +111,28 @@ class TradingAgent:
     def make_broker(self):
         from .broker.paper import PaperBroker
         if self.cfg.live_trading_armed:
+            acct = os.getenv("ROBINHOOD_ACCOUNT_NUMBER")
+            url = self.cfg.robinhood_url()
+            # 1) durable SDK/OAuth path (preferred — auto-refreshes tokens)
             try:
-                from .broker.robinhood_mcp import RobinhoodMCPBroker
-                acct = os.getenv("ROBINHOOD_ACCOUNT_NUMBER")
-                b = RobinhoodMCPBroker(self.cfg.robinhood_url(), self.cfg.robinhood_token(),
-                                       account_number=acct)
-                log.warning("LIVE broker active (Robinhood Agentic MCP)")
-                return b
+                from .broker.oauth import FileTokenStorage
+                if FileTokenStorage().has_tokens():
+                    from .broker.robinhood_sdk import RobinhoodSDKBroker
+                    log.warning("LIVE broker active (Robinhood SDK/OAuth)")
+                    return RobinhoodSDKBroker(url, account_number=acct)
             except Exception as e:
-                log.error("Robinhood MCP broker unavailable (%s); refusing to fall back to live. "
-                          "Using PAPER.", e)
+                log.error("Robinhood SDK broker unavailable: %s", e)
+            # 2) static-token path (ROBINHOOD_MCP_TOKEN)
+            tok = self.cfg.robinhood_token()
+            if tok:
+                try:
+                    from .broker.robinhood_mcp import RobinhoodMCPBroker
+                    log.warning("LIVE broker active (Robinhood static-token MCP)")
+                    return RobinhoodMCPBroker(url, tok, account_number=acct)
+                except Exception as e:
+                    log.error("Robinhood token broker unavailable: %s", e)
+            log.error("Live armed but no Robinhood auth (run `rh-agent auth` or set "
+                      "ROBINHOOD_MCP_TOKEN). Falling back to PAPER.")
         return PaperBroker(self.price_fn, starting_cash=self.default_equity(),
                            slippage_bps=self.cfg.get("backtest.slippage_bps", 5.0))
 

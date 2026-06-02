@@ -147,7 +147,7 @@ regime:
 # NORMALIZATION / NOISE CONTROL  — robust cross-sectional scoring.
 # ----------------------------------------------------------------------
 normalize:
-  method: "zscore"               # zscore -> percentile mapping
+  method: "rank_percentile"      # winsorise outliers, then cross-sectional rank -> 0..100
   winsorize_sigma: 3.0           # clip outliers at +/- 3 sigma before scoring
   min_factor_coverage: 0.5       # a factor needs >=50% of names to count, else neutralized
   # Require multi-pillar confirmation to make the buy list (kills single-signal noise).

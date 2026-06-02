@@ -36,6 +36,67 @@ _PATTERNS = {
 }
 
 
+def discover_tool_map(names: list[str]) -> dict:
+    """Map a server's tool names to logical capabilities via the patterns."""
+    mp = {}
+    for cap, pats in _PATTERNS.items():
+        for pat in pats:
+            hit = next((n for n in names if re.search(pat, n, re.I)), None)
+            if hit:
+                mp[cap] = hit
+                break
+    return mp
+
+
+# Shared parsers so both the lightweight and SDK brokers return identical shapes.
+def parse_account(prof, positions_raw, account_number: str | None) -> Account:
+    cash = bp = equity = 0.0
+    d = prof[0] if isinstance(prof, list) and prof else prof
+    if isinstance(d, dict):
+        cash = float(d.get("cash") or d.get("buying_power") or 0)
+        bp = float(d.get("buying_power") or cash)
+        equity = float(d.get("equity") or d.get("portfolio_equity") or 0)
+    positions = []
+    rows = positions_raw if isinstance(positions_raw, list) else (
+        positions_raw.get("positions", []) if isinstance(positions_raw, dict) else [])
+    for p in rows:
+        if not isinstance(p, dict):
+            continue
+        qty = float(p.get("quantity") or p.get("shares") or 0)
+        if qty == 0:
+            continue
+        px = float(p.get("price") or p.get("current_price") or p.get("last_price") or 0)
+        positions.append(Position(
+            ticker=p.get("symbol") or p.get("ticker"), quantity=qty,
+            avg_price=float(p.get("average_buy_price") or p.get("avg_price") or 0),
+            current_price=px, market_value=round(qty * px, 2)))
+    if equity == 0:
+        equity = cash + sum(p.market_value for p in positions)
+    return Account(equity=round(equity, 2), cash=round(cash, 2), buying_power=round(bp or cash, 2),
+                   positions=positions, account_number=account_number or "agentic", source="robinhood")
+
+
+def order_args(order: Order, dry_run: bool, account_number: str | None) -> dict:
+    args = {
+        "symbol": order.ticker, "ticker": order.ticker,
+        "side": order.side, "action": order.side,
+        "order_type": order.order_type, "type": order.order_type,
+        "time_in_force": order.time_in_force, "dry_run": dry_run,
+    }
+    if order.quantity:
+        args["quantity"] = round(order.quantity, 6)
+        args["shares"] = round(order.quantity, 6)
+    if order.notional:
+        args["amount"] = round(order.notional, 2)
+        args["notional"] = round(order.notional, 2)
+    if order.order_type == "limit" and order.limit_price:
+        args["limit_price"] = round(order.limit_price, 2)
+        args["price"] = round(order.limit_price, 2)
+    if account_number:
+        args["account_number"] = account_number
+    return args
+
+
 class RobinhoodMCPBroker(Broker):
     name = "robinhood"
     supports_live = True
@@ -53,15 +114,7 @@ class RobinhoodMCPBroker(Broker):
                  len(self.tools), {k: v for k, v in self.map.items()})
 
     def _discover(self) -> dict:
-        names = list(self.tools)
-        mp = {}
-        for cap, pats in _PATTERNS.items():
-            for pat in pats:
-                hit = next((n for n in names if re.search(pat, n, re.I)), None)
-                if hit:
-                    mp[cap] = hit
-                    break
-        return mp
+        return discover_tool_map(list(self.tools))
 
     def _call(self, cap: str, args: dict | None = None):
         tool = self.map.get(cap)
@@ -72,63 +125,24 @@ class RobinhoodMCPBroker(Broker):
     # ------------------------------------------------------------------ account
     def get_account(self) -> Account:
         acct_no = self.account_number
-        cash = bp = equity = 0.0
+        prof = positions_raw = None
         try:
             prof = self._call("buying_power", {} if not acct_no else {"account_number": acct_no})
-            d = prof[0] if isinstance(prof, list) and prof else prof
-            if isinstance(d, dict):
-                cash = float(d.get("cash") or d.get("buying_power") or 0)
-                bp = float(d.get("buying_power") or cash)
-                equity = float(d.get("equity") or d.get("portfolio_equity") or 0)
         except Exception as e:
             log.warning("buying_power read failed: %s", e)
-        positions = []
         try:
-            raw = self._call("positions", {} if not acct_no else {"account_number": acct_no})
-            for p in (raw if isinstance(raw, list) else raw.get("positions", []) if isinstance(raw, dict) else []):
-                if not isinstance(p, dict):
-                    continue
-                qty = float(p.get("quantity") or p.get("shares") or 0)
-                if qty == 0:
-                    continue
-                px = float(p.get("price") or p.get("current_price") or p.get("last_price") or 0)
-                positions.append(Position(
-                    ticker=p.get("symbol") or p.get("ticker"),
-                    quantity=qty, avg_price=float(p.get("average_buy_price") or p.get("avg_price") or 0),
-                    current_price=px, market_value=round(qty * px, 2)))
+            positions_raw = self._call("positions", {} if not acct_no else {"account_number": acct_no})
         except Exception as e:
             log.warning("positions read failed: %s", e)
-        if equity == 0:
-            equity = cash + sum(p.market_value for p in positions)
-        return Account(equity=round(equity, 2), cash=round(cash, 2),
-                       buying_power=round(bp or cash, 2), positions=positions,
-                       account_number=acct_no or "agentic", source="robinhood")
+        return parse_account(prof, positions_raw, acct_no)
 
     # ------------------------------------------------------------------ orders
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
-        args = {
-            "symbol": order.ticker, "ticker": order.ticker,
-            "side": order.side, "action": order.side,
-            "order_type": order.order_type, "type": order.order_type,
-            "time_in_force": order.time_in_force,
-            "dry_run": dry_run,
-        }
-        if order.quantity:
-            args["quantity"] = round(order.quantity, 6)
-            args["shares"] = round(order.quantity, 6)
-        if order.notional:
-            args["amount"] = round(order.notional, 2)
-            args["notional"] = round(order.notional, 2)
-        if order.order_type == "limit" and order.limit_price:
-            args["limit_price"] = round(order.limit_price, 2)
-            args["price"] = round(order.limit_price, 2)
-        if self.account_number:
-            args["account_number"] = self.account_number
         if dry_run:
             # If the live tool can't preview, return our own preview rather than risk a send.
             return {"status": "preview", "ticker": order.ticker, "side": order.side,
                     "qty": order.quantity, "note": "dry_run (not transmitted unless tool previews)"}
-        res = self._call("place_order", args)
+        res = self._call("place_order", order_args(order, dry_run, self.account_number))
         return {"status": "submitted", "ticker": order.ticker, "result": res}
 
     def get_orders(self) -> list:

@@ -102,6 +102,27 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def cmd_auth(args) -> int:
+    """One-time Robinhood OAuth for the standalone bot (opens a browser)."""
+    cfg = load_config(args.config)
+    from .broker.oauth import authenticate
+    url = cfg.robinhood_url()
+    print(f"Authenticating with Robinhood Agentic MCP at {url}")
+    print("A browser window will open — approve access, then return here.\n")
+    try:
+        tools = authenticate(url, port=args.port)
+    except Exception as e:
+        print(f"Auth failed: {e}")
+        return 1
+    print("\n✅ Authenticated. Tokens saved to state/robinhood_oauth.json (chmod 600).")
+    print(f"Discovered {len(tools)} tools: {', '.join(tools[:12])}"
+          f"{'...' if len(tools) > 12 else ''}")
+    print("\nNow arm live trading and run the loop:")
+    print("  EXECUTION_MODE=live LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY "
+          "./scripts/run_loop.sh --execute")
+    return 0
+
+
 def cmd_loop(args) -> int:
     """Run the always-on autonomous agent."""
     from .daemon import AlwaysOnAgent
@@ -120,6 +141,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser("auth", help="one-time Robinhood OAuth for the standalone bot")
+    s.add_argument("--port", type=int, default=8765, help="localhost OAuth callback port")
+    s.set_defaults(func=cmd_auth)
     s = sub.add_parser("status"); s.add_argument("--snapshot"); s.set_defaults(func=cmd_status)
 
     s = sub.add_parser("scan")

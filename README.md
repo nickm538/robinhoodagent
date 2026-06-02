@@ -85,9 +85,19 @@ claude mcp add robinhood-trading --transport http https://agent.robinhood.com/mc
 Claude can then place the agent's recommended orders by calling the Robinhood
 MCP tools directly.
 
-**If you run the standalone bot:** after authorising, put the OAuth access token
-in `.env` as `ROBINHOOD_MCP_TOKEN=...` (or `ROBINHOOD_MCP_TOKEN_FILE=...`). The
-bot's `RobinhoodMCPBroker` auto-discovers the server's tools and places orders.
+**If you run the standalone bot (recommended for 24/7):** authenticate the bot
+itself, once, on the machine that will run it:
+
+```bash
+pip install "mcp>=1.2.0"      # the `live` extra
+python -m rh_agent.cli auth    # opens a browser → approve → tokens cached to state/
+```
+
+`rh-agent auth` runs Robinhood's OAuth and saves the tokens to
+`state/robinhood_oauth.json` (chmod 600). From then on the bot authenticates
+non-interactively and the SDK **auto-refreshes** the access token — so it trades
+hands-off indefinitely. (Alternative: paste a token as `ROBINHOOD_MCP_TOKEN=...`
+in `.env`; the lightweight broker will use it, but it won't auto-refresh.)
 
 Equities only in beta. Fund the Agentic account with the capital you want the
 agent to manage.
@@ -136,8 +146,9 @@ executes. A **daily-drawdown circuit breaker** suspends new buying after a -6%
 day. It is crash-resistant — an error in one cycle is logged and the loop keeps
 going.
 
-**Deploy it to stay up 24/7** (this is what makes it truly "always-on" — a laptop
-or a sandbox that sleeps will not do):
+For **live** trading first run `python -m rh_agent.cli auth` once (above), then
+arm and deploy. **Deploy it to stay up 24/7** (this is what makes it truly
+"always-on" — a laptop or a sandbox that sleeps will not do):
 
 * **systemd** — `deploy/rh-agent.service` (auto-restart, boots with the host)
 * **Docker** — `docker build -t rh-agent . && docker run -d --env-file .env rh-agent`

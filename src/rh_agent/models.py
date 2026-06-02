@@ -124,7 +124,7 @@ class Account:
 class Order:
     ticker: str
     side: str                         # "buy" | "sell"
-    quantity: float
+    quantity: Optional[float] = None  # shares; None when using notional
     order_type: str = "market"        # market | limit
     limit_price: Optional[float] = None
     time_in_force: str = "gfd"
@@ -135,7 +135,7 @@ class Order:
         d = {
             "ticker": self.ticker,
             "side": self.side,
-            "quantity": round(self.quantity, 6) if self.quantity else self.quantity,
+            "quantity": round(self.quantity, 6) if self.quantity is not None else None,
             "order_type": self.order_type,
             "time_in_force": self.time_in_force,
         }

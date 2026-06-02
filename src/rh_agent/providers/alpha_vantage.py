@@ -99,9 +99,11 @@ class AlphaVantageProvider(DataProvider):
         d = self._q("overview", 1440, {"function": "OVERVIEW", "symbol": ticker})
         if not isinstance(d, dict) or not d.get("Symbol"):
             raise ProviderUnsupported
+        gp, rev = _num(d.get("GrossProfitTTM")), _num(d.get("RevenueTTM"))
+        gross_margin = (gp / rev) if (gp is not None and rev) else None
         return {
             "roe": _num(d.get("ReturnOnEquityTTM")), "roa": _num(d.get("ReturnOnAssetsTTM")),
-            "gross_margin": _num(d.get("GrossProfitTTM")) and None,  # AV lacks direct GM ratio
+            "gross_margin": gross_margin,
             "operating_margin": _num(d.get("OperatingMarginTTM")),
             "net_margin": _num(d.get("ProfitMargin")),
             "revenue_growth": _num(d.get("QuarterlyRevenueGrowthYOY")),
