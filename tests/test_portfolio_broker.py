@@ -67,3 +67,27 @@ def test_paper_broker_dry_run_does_not_fill(tmp_path):
     res = broker.place_order(Order("X", "buy", 1), dry_run=True)
     assert res["status"] == "preview"
     assert broker.get_account().cash == 1_000
+
+
+def test_paper_broker_rejects_bad_side_and_unheld_sell(tmp_path):
+    broker = PaperBroker(lambda t: 10.0, starting_cash=1_000, state_path=tmp_path / "a.json")
+    assert broker.place_order(Order("X", "hold", 1), dry_run=False)["status"] == "rejected"
+    assert broker.place_order(Order("X", "sell", 1), dry_run=False)["status"] == "rejected"
+
+
+def test_robinhood_tool_mapping_official_names():
+    from rh_agent.broker.robinhood_mcp import discover_tool_map, pick_account_number
+    real = ["cancel_equity_order", "get_accounts", "get_equity_orders", "get_equity_positions",
+            "get_equity_quotes", "get_equity_tradability", "get_portfolio",
+            "place_equity_order", "review_equity_order", "search"]
+    m = discover_tool_map(real)
+    assert m["positions"] == "get_equity_positions"
+    assert m["place_order"] == "place_equity_order"
+    assert m["orders"] == "get_equity_orders"
+    assert m["quote"] == "get_equity_quotes"
+    assert m["accounts"] == "get_accounts"
+    assert m["buying_power"] == "get_portfolio"
+    assert m["cancel"] == "cancel_equity_order"
+    assert pick_account_number(
+        {"accounts": [{"account_number": "A1", "type": "brokerage"},
+                      {"account_number": "A2", "type": "agentic"}]}) == "A2"
