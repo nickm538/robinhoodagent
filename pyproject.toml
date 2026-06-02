@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rh-agent"
+version = "1.0.0"
+description = "Quantamental multi-factor trading agent for the Robinhood Agentic Trading MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "robinhood_agent" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+live = ["mcp>=1.2.0"]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+rh-agent = "rh_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
