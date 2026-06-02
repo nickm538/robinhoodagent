@@ -1,0 +1,23 @@
+# systemd unit for the always-on agent.
+# Install:
+#   sudo cp deploy/rh-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rh-agent
+# Edit User/WorkingDirectory/EnvironmentFile to match your host.
+[Unit]
+Description=rh-agent always-on autonomous trading agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/opt/robinhood_agent
+EnvironmentFile=/opt/robinhood_agent/.env
+ExecStart=/opt/robinhood_agent/.venv/bin/python -m rh_agent.cli loop --execute
+Restart=always
+RestartSec=30
+StandardOutput=append:/opt/robinhood_agent/logs/loop.log
+StandardError=append:/opt/robinhood_agent/logs/loop.log
+
+[Install]
+WantedBy=multi-user.target

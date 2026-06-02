@@ -1,0 +1,69 @@
+"""Tests for portfolio caps and the paper broker."""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from rh_agent.broker.paper import PaperBroker
+from rh_agent.config import load_config
+from rh_agent.models import Order, TargetPosition, TickerData, Verdict
+from rh_agent.portfolio import PortfolioBuilder
+from rh_agent.regime import RegimeResult
+
+
+def _td(ticker, sector, vol=0.3):
+    df = pd.DataFrame({"close": np.linspace(100, 120, 60),
+                       "high": np.linspace(101, 121, 60),
+                       "low": np.linspace(99, 119, 60),
+                       "adj_close": np.linspace(100, 120, 60),
+                       "volume": [1e6] * 60},
+                      index=pd.date_range("2024-01-01", periods=60, freq="B"))
+    td = TickerData(ticker, company={"sector": sector, "market_cap": 5e10},
+                    prices=df, technicals={"volatility": vol, "atr": 2.0, "price": 120.0})
+    return td
+
+
+def test_position_and_sector_caps():
+    cfg = load_config()
+    cfg.raw["portfolio"]["max_position_weight"] = 0.10
+    cfg.raw["portfolio"]["max_sector_weight"] = 0.35
+    cfg.raw["portfolio"]["target_positions"] = 12
+    builder = PortfolioBuilder(cfg)
+    # 8 tech names + 2 others -> tech must be capped at 35%
+    verdicts, td_map = [], {}
+    for i in range(8):
+        t = f"T{i}"
+        verdicts.append(Verdict(t, 80 - i, {}, 5))
+        td_map[t] = _td(t, "Information Technology")
+    for t in ["FIN", "HLTH"]:
+        verdicts.append(Verdict(t, 70, {}, 5))
+        td_map[t] = _td(t, "Financials" if t == "FIN" else "Health Care")
+    regime = RegimeResult("risk_on_trend", {}, 1.0)
+    targets = builder.build(verdicts, td_map, regime, 100_000)
+
+    assert all(t.weight <= 0.10 + 1e-6 for t in targets)        # per-name cap
+    tech = sum(t.weight for t in targets if t.sector == "Information Technology")
+    assert tech <= 0.35 + 1e-6                                   # sector cap
+    assert sum(t.weight for t in targets) <= 1.0 + 1e-6
+
+
+def test_paper_broker_buy_sell(tmp_path):
+    prices = {"AAA": 100.0}
+    broker = PaperBroker(lambda t: prices.get(t), starting_cash=10_000,
+                         slippage_bps=0, state_path=tmp_path / "acct.json")
+    broker.place_order(Order("AAA", "buy", 10), dry_run=False)
+    acct = broker.get_account()
+    assert acct.cash == 9_000
+    assert acct.position_map()["AAA"].quantity == 10
+    broker.place_order(Order("AAA", "sell", 10), dry_run=False)
+    acct = broker.get_account()
+    assert acct.cash == 10_000
+    assert "AAA" not in acct.position_map()
+
+
+def test_paper_broker_dry_run_does_not_fill(tmp_path):
+    broker = PaperBroker(lambda t: 50.0, starting_cash=1_000,
+                         state_path=tmp_path / "a.json")
+    res = broker.place_order(Order("X", "buy", 1), dry_run=True)
+    assert res["status"] == "preview"
+    assert broker.get_account().cash == 1_000

@@ -1,0 +1,199 @@
+# ======================================================================
+#  rh-agent strategy configuration
+#  -----------------------------------------------------------------
+#  This file is the "trading floor rulebook". Every number here is a
+#  deliberate, documented choice. Nothing in the engine is hard-coded
+#  past what you see here, so you can tune the whole system from one place.
+# ======================================================================
+
+meta:
+  name: "Quantamental Panel-of-5"
+  # North-star objective. NOTE: this is a *target*, not a promise. No system
+  # can guarantee beating, let alone doubling, the index. See README risk notes.
+  objective: "Maximize 1- and 3-month risk-adjusted return vs SPY/DIA"
+  benchmarks: ["SPY", "DIA"]      # S&P 500 and Dow proxies
+  base_currency: "USD"
+
+# ----------------------------------------------------------------------
+# DATA PROVIDERS  — priority/fallback order. The MarketData facade tries
+# them in order and uses the first that answers. MBOUM + FinancialDatasets
+# are prioritized per mandate.
+# ----------------------------------------------------------------------
+providers:
+  # FinancialDatasets.AI + Mboum are PRIMARY everywhere they are capable;
+  # Alpha Vantage / Twelve Data are fallbacks and fill unique gaps
+  # (news sentiment, macro, options positioning).
+  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
+  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  quote:          ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
+  insider:        ["financialdatasets", "mboum", "alphavantage"]
+  institutional:  ["financialdatasets", "mboum", "alphavantage"]
+  news_sentiment: ["alphavantage", "mboum"]
+  analyst_ratings: ["mboum", "financialdatasets"]
+  short_interest: ["mboum"]
+  options_flow:   ["alphavantage", "mboum"]
+  pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
+  macro:          ["alphavantage"]
+  cache_ttl_minutes:
+    quote: 10
+    prices: 720
+    fundamentals: 1440
+    insider: 720
+    institutional: 1440
+    news_sentiment: 120
+    analyst_ratings: 720
+    macro: 720
+    pro_scores: 720
+
+# ----------------------------------------------------------------------
+# UNIVERSE  — what is eligible to trade. "Full universe minus penny stocks
+# and poor liquidity" per mandate.
+# ----------------------------------------------------------------------
+universe:
+  source: "auto"                  # auto = listing status + index members; or "snapshot"
+  include_etfs: false             # equities only (Robinhood agentic beta is equities-only)
+  exclude_otc: true
+  exclude_funds: true
+  liquidity:
+    min_price: 5.0                # no penny stocks
+    max_price: 100000.0
+    min_market_cap: 1000000000    # >= $1B (large/mid; tunable to 300M for more "diamonds")
+    min_avg_dollar_volume: 5000000  # >= $5M traded/day -> tradable without slippage
+    min_avg_volume_shares: 200000
+    min_history_days: 200         # need enough bars for 200dma / 12-1 momentum
+  # Hard exclusions
+  exclude_sectors: []             # e.g. ["Energy"] to sit out a sector
+  blacklist: []                   # tickers to never trade
+  # Coarse pre-screen (cheap) before deep multi-factor scoring (expensive).
+  prescreen:
+    enabled: true
+    max_candidates: 250           # deep-score at most this many survivors per run
+
+# ----------------------------------------------------------------------
+# THE PANEL OF FIVE  — five veteran-trader personas (an ensemble). Each
+# scores every candidate 0..100 from its own factor lens. The Chief PM
+# (regime engine) blends them with weights that adapt to the market.
+# ----------------------------------------------------------------------
+analysts:
+  momentum_trader:
+    description: "Trend & price momentum. Buys strength, respects the tape."
+    factors:
+      mom_12_1: 0.28              # 12-month return excl. last month (classic anomaly)
+      mom_6_1: 0.18
+      mom_3_1: 0.12
+      risk_adj_momentum: 0.16     # return / volatility (Sharpe-like)
+      trend_sma: 0.14             # price vs 50/200dma, 50>200 golden-cross
+      dist_52w_high: 0.12         # proximity to 52-wk high (capped to avoid blowoff)
+  quant:
+    description: "Quality + factor fundamentals. Wants durable, efficient compounders."
+    factors:
+      roe: 0.16
+      roic: 0.16
+      gross_margin: 0.10
+      net_margin: 0.10
+      revenue_growth: 0.14
+      earnings_growth: 0.14
+      fcf_yield: 0.10
+      balance_sheet_strength: 0.10   # debt/equity, current ratio, interest coverage
+  catalyst_trader:
+    description: "Earnings revisions & surprises — the engine behind 'estimate momentum'."
+    factors:
+      eps_estimate_revision: 0.34
+      earnings_surprise_history: 0.26
+      revenue_estimate_revision: 0.20
+      upcoming_catalyst: 0.20        # earnings within horizon (opportunity + risk flag)
+  smart_money:
+    description: "Follows insiders & institutions — informed-flow tracker."
+    factors:
+      insider_net_buying: 0.40
+      institutional_net_buying: 0.35
+      short_squeeze_setup: 0.25      # short interest + days-to-cover vs rising price
+  sentiment_analyst:
+    description: "News, options positioning, and pro-source ratings (Zacks/M*/Danelfin/TipRanks)."
+    factors:
+      news_sentiment: 0.28
+      options_positioning: 0.16      # put/call ratio (contrarian-aware)
+      zacks_rank: 0.16
+      analyst_consensus_upside: 0.18 # price-target upside + buy ratio
+      danelfin_ai: 0.12
+      morningstar: 0.10
+
+# ----------------------------------------------------------------------
+# REGIME ENGINE  — "weighted scoring optimized for the current market".
+# Detects the regime from price trend / volatility / breadth / rates,
+# then chooses which analysts to lean on.
+# ----------------------------------------------------------------------
+regime:
+  signals:
+    spx_trend_lookback: 200       # SPX vs its 200dma
+    vix_calm_below: 16
+    vix_stress_above: 26
+    breadth_proxy: "RSP_vs_SPY"   # equal-weight vs cap-weight (breadth)
+  # Ensemble weights per regime. Rows sum to 1.0. The Chief PM picks the row.
+  weights:
+    risk_on_trend:    {momentum_trader: 0.34, quant: 0.16, catalyst_trader: 0.22, smart_money: 0.12, sentiment_analyst: 0.16}
+    neutral:          {momentum_trader: 0.24, quant: 0.24, catalyst_trader: 0.20, smart_money: 0.16, sentiment_analyst: 0.16}
+    risk_off:         {momentum_trader: 0.12, quant: 0.40, catalyst_trader: 0.14, smart_money: 0.18, sentiment_analyst: 0.16}
+    high_volatility:  {momentum_trader: 0.18, quant: 0.34, catalyst_trader: 0.16, smart_money: 0.16, sentiment_analyst: 0.16}
+  # Gross-exposure throttle per regime (fraction of equity deployed).
+  exposure:
+    risk_on_trend: 1.00
+    neutral: 0.85
+    risk_off: 0.50
+    high_volatility: 0.60
+
+# ----------------------------------------------------------------------
+# NORMALIZATION / NOISE CONTROL  — robust cross-sectional scoring.
+# ----------------------------------------------------------------------
+normalize:
+  method: "zscore"               # zscore -> percentile mapping
+  winsorize_sigma: 3.0           # clip outliers at +/- 3 sigma before scoring
+  min_factor_coverage: 0.5       # a factor needs >=50% of names to count, else neutralized
+  # Require multi-pillar confirmation to make the buy list (kills single-signal noise).
+  min_pillars_passing: 3         # candidate must score >=55 in at least N of 5 analysts
+  pillar_pass_threshold: 55.0
+
+# ----------------------------------------------------------------------
+# PORTFOLIO CONSTRUCTION & RISK  — veteran discipline.
+# ----------------------------------------------------------------------
+portfolio:
+  target_positions: 15           # concentrated enough to outperform, diversified enough to survive
+  min_conviction_score: 60.0     # composite 0..100 floor to be eligible
+  weighting: "vol_target"        # inverse-volatility / conviction blend
+  conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
+  max_position_weight: 0.10      # <=10% per name
+  min_position_weight: 0.02
+  max_sector_weight: 0.35        # diversification cap per GICS sector
+  cash_floor: 0.02
+  rebalance:
+    schedule: "weekly"           # weekly cadence suits a 1-3 month horizon w/o overtrading
+    no_trade_band: 0.015         # ignore drift < 1.5% to cut turnover/costs
+    max_turnover_per_rebalance: 0.40
+  risk_controls:
+    stop_loss_atr_mult: 2.5      # trailing stop at 2.5x ATR(14)
+    take_profit_atr_mult: 6.0
+    hard_stop_pct: 0.18          # absolute -18% disaster stop
+    max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day
+    per_trade_risk_pct: 0.01     # risk ~1% of equity per position at stop
+
+# ----------------------------------------------------------------------
+# BACKTEST  — walk-forward, real prices, vs benchmark.
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# DAEMON  — the always-on autonomous loop.
+# ----------------------------------------------------------------------
+daemon:
+  poll_seconds: 900            # think/act every 15 min
+  trade_only_when_open: true   # only trade during US market hours
+  manage_stops_every_tick: true
+
+# ----------------------------------------------------------------------
+backtest:
+  start: "2019-01-01"
+  end: "auto"
+  initial_equity: 100000
+  rebalance: "monthly"           # matches the 1-month evaluation horizon
+  commission_bps: 1.0            # Robinhood is commission-free; model tiny slippage
+  slippage_bps: 5.0
+  benchmark: "SPY"

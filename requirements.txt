@@ -1,0 +1,14 @@
+# Core numerical / data
+numpy>=1.26
+pandas>=2.1
+
+# HTTP + config
+requests>=2.31
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# Pretty CLI / reporting
+rich>=13.7
+
+# Optional (live MCP broker client). The agent degrades gracefully if absent.
+# mcp>=1.2.0
