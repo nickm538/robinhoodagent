@@ -31,7 +31,15 @@ def cmd_doctor(args) -> int:
     print("\nAPI keys present:")
     for p in ["financialdatasets", "mboum", "alphavantage", "twelvedata", "firecrawl", "exa"]:
         print(f"  {p:18} {'✓' if cfg.api_key(p) else '— (missing)'}")
-    print(f"  robinhood token    {'✓' if cfg.robinhood_token() else '— (authorise MCP first)'}")
+    rh_tok = cfg.robinhood_token()
+    if not rh_tok:
+        try:
+            from .broker.oauth import FileTokenStorage
+            if FileTokenStorage().has_tokens():
+                rh_tok = "oauth"
+        except Exception:
+            pass
+    print(f"  robinhood token    {'✓ (OAuth)' if rh_tok else '— (run: rh-agent auth)'}")
     print(f"\nExecution mode: {cfg.execution_mode}  |  live armed: {cfg.live_trading_armed}")
     print("\nDirect egress (needs your environment's network policy to allow these hosts):")
     hosts = {"financialdatasets": "https://api.financialdatasets.ai",
