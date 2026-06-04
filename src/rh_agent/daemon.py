@@ -88,9 +88,13 @@ class AlwaysOnAgent:
         if not self.state.last_rebalance:
             return True
         last = datetime.fromisoformat(self.state.last_rebalance)
+        elapsed = (now - last).total_seconds()
         sched = self.cfg.get("portfolio.rebalance.schedule", "weekly")
+        if sched == "intraday":   # re-rank several times a day (also covers 'daily')
+            hours = float(self.cfg.get("portfolio.rebalance.intraday_hours", 2))
+            return elapsed >= hours * 3600
         days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(sched, 7)
-        return (now - last).total_seconds() >= days * 86400
+        return elapsed >= days * 86400
 
     # -- one cycle --
     def tick(self, execute: bool = False) -> None:
