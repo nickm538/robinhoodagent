@@ -67,7 +67,13 @@ class TradingAgent:
         self._quote_cache[ticker] = px
         return px
 
-    def universe(self, limit: int | None = None) -> list[str]:
+    def universe(self, limit: int | None = None, watchlist: list[str] | None = None) -> list[str]:
+        # explicit --tickers (even if empty) overrides config universe.watchlist;
+        # only fall back to config when no watchlist was passed at all.
+        wl = watchlist if watchlist is not None else (self.cfg.get("universe.watchlist") or [])
+        if wl:
+            tickers = [t.strip().upper() for t in wl if t and t.strip()]
+            return tickers[:limit] if limit else tickers
         if "snapshot" in self.providers:
             tickers = self.providers["snapshot"].list_universe()
         else:
@@ -99,11 +105,12 @@ class TradingAgent:
         return out
 
     # ---- scan & score ----
-    def scan(self, equity: float | None = None, limit: int | None = None) -> ScanResult:
+    def scan(self, equity: float | None = None, limit: int | None = None,
+             tickers: list[str] | None = None) -> ScanResult:
         equity = equity or self.default_equity()
-        tickers = self.universe(limit)
-        log.info("scanning %d tickers", len(tickers))
-        data = self._gather(tickers, deep=True)
+        names = self.universe(limit, watchlist=tickers)
+        log.info("scanning %d tickers", len(names))
+        data = self._gather(names, deep=True)
         for td in data:
             if td.quote:
                 self._quote_cache[td.ticker] = td.quote.price
@@ -113,7 +120,7 @@ class TradingAgent:
         td_map = {td.ticker: td for td in data}
         targets = self.builder.build(eligible, td_map, regime, equity)
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
-                          equity=equity, universe_size=len(tickers), scored_size=len(data),
+                          equity=equity, universe_size=len(names), scored_size=len(data),
                           td_map=td_map)
 
     # ---- broker ----
@@ -146,10 +153,10 @@ class TradingAgent:
                            slippage_bps=self.cfg.get("backtest.slippage_bps", 5.0))
 
     # ---- full run ----
-    def run(self, execute: bool = False) -> RunResult:
+    def run(self, execute: bool = False, tickers: list[str] | None = None) -> RunResult:
         broker = self.make_broker()
         account = broker.get_account()
-        scan = self.scan(equity=account.equity or self.default_equity())
+        scan = self.scan(equity=account.equity or self.default_equity(), tickers=tickers)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn)
 
         live = self.cfg.live_trading_armed and broker.supports_live
@@ -166,10 +173,10 @@ class TradingAgent:
                          executed=execute, mode=mode)
 
     # ---- backtest ----
-    def backtest(self, limit: int | None = None) -> "object":
+    def backtest(self, limit: int | None = None, tickers: list[str] | None = None) -> "object":
         from .backtest.engine import Backtester
         bench_sym = self.cfg.get("backtest.benchmark", "SPY")
-        tickers = self.universe(limit)
+        tickers = self.universe(limit, watchlist=tickers)
         prices: dict[str, pd.DataFrame] = {}
         for t in tickers:
             df = self.md.get_prices(t)

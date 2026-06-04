@@ -65,6 +65,8 @@ universe:
   # Hard exclusions
   exclude_sectors: []             # e.g. ["Energy"] to sit out a sector
   blacklist: []                   # tickers to never trade
+  watchlist: []                   # if non-empty, scan ONLY these tickers (focused / 24-7 list);
+                                  # empty = full-universe scan. e.g. ["NVDA","MSFT","AAPL","AVGO"]
   # Coarse pre-screen (cheap) before deep multi-factor scoring (expensive).
   prescreen:
     enabled: true

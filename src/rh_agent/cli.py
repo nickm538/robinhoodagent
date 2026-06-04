@@ -62,10 +62,18 @@ def cmd_status(args) -> int:
     return 0
 
 
+def _watchlist(args):
+    raw = getattr(args, "tickers", None)
+    if not raw:
+        return None
+    items = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    return items or None
+
+
 def cmd_scan(args) -> int:
     from . import report
     agent, cfg = _agent(args)
-    scan = agent.scan(equity=args.equity, limit=args.limit)
+    scan = agent.scan(equity=args.equity, limit=args.limit, tickers=_watchlist(args))
     report.render_scan(scan)
     if args.md:
         path = report.write_markdown(scan)
@@ -87,7 +95,7 @@ def cmd_run(args) -> int:
         print("Refusing: EXECUTION_MODE=live but LIVE_TRADING_CONFIRM is not set to "
               "'I_UNDERSTAND_REAL_MONEY'. Aborting.")
         return 2
-    run = agent.run(execute=args.execute)
+    run = agent.run(execute=args.execute, tickers=_watchlist(args))
     report.render_run(run)
     path = report.write_markdown(run.scan, run=run)
     print(f"\nMarkdown brief written to {path}")
@@ -97,7 +105,7 @@ def cmd_run(args) -> int:
 def cmd_backtest(args) -> int:
     from . import report
     agent, cfg = _agent(args)
-    res = agent.backtest(limit=args.limit)
+    res = agent.backtest(limit=args.limit, tickers=_watchlist(args))
     report.render_backtest(res)
     return 0
 
@@ -161,17 +169,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("scan")
     s.add_argument("--snapshot"); s.add_argument("--limit", type=int)
+    s.add_argument("--tickers", help="comma-separated watchlist, e.g. NVDA,MSFT,AAPL")
     s.add_argument("--equity", type=float); s.add_argument("--md", action="store_true")
     s.add_argument("--json", nargs="?", const="-")
     s.set_defaults(func=cmd_scan)
 
     s = sub.add_parser("run")
     s.add_argument("--snapshot"); s.add_argument("--limit", type=int)
+    s.add_argument("--tickers", help="comma-separated watchlist")
     s.add_argument("--execute", action="store_true", help="place orders (paper unless live armed)")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("backtest")
     s.add_argument("--snapshot"); s.add_argument("--limit", type=int)
+    s.add_argument("--tickers", help="comma-separated watchlist")
     s.add_argument("--start"); s.add_argument("--end")
     s.set_defaults(func=cmd_backtest)
 
