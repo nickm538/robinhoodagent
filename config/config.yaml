@@ -164,19 +164,19 @@ normalize:
 # PORTFOLIO CONSTRUCTION & RISK  — veteran discipline.
 # ----------------------------------------------------------------------
 portfolio:
-  target_positions: 8            # concentrate the book on the best finds from a wide hunt
+  target_positions: 12           # concentrated for alpha, diversified enough to survive a blowup
   min_conviction_score: 60.0     # composite 0..100 floor to be eligible
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
-  max_position_weight: 0.20      # <=20% per name — bigger swings on top-conviction ideas
+  max_position_weight: 0.12      # <=12% per name — conviction tilt without single-name fragility
   min_position_weight: 0.02
   max_sector_weight: 0.35        # diversification cap per GICS sector
   cash_floor: 0.02
   rebalance:
-    schedule: "intraday"         # re-rank several times each session — reactive, not weekly
-    intraday_hours: 2            # cadence when schedule == intraday (re-rank every N hours)
-    no_trade_band: 0.01          # act on drift >= 1.0% (tighter -> more reactive)
-    max_turnover_per_rebalance: 0.40
+    schedule: "intraday"         # re-rank ~2x/session — reactive to catalysts, not frozen weekly
+    intraday_hours: 3            # cadence when schedule == intraday (re-rank every N hours)
+    no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
+    max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
     stop_loss_atr_mult: 2.5      # trailing stop at 2.5x ATR(14)
     take_profit_atr_mult: 6.0
@@ -197,7 +197,7 @@ ai_analyst:
   enabled: true
   model: "claude-sonnet-4-6"   # or "claude-opus-4-8" for max reasoning (pricier)
   effort: "low"                # low | medium | high  (depth vs cost per cycle)
-  weight: 0.40                 # blend: composite = 0.60*quant + 0.40*AI (lean on the live read)
+  weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
   max_candidates: 20           # send the top N quant names to Claude (wider hunt -> review more)
   max_tokens: 6000
 
