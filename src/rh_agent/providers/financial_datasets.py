@@ -147,6 +147,16 @@ class FinancialDatasetsProvider(DataProvider):
                 "net_change_pct": (delta / total_shares) if total_shares else None,
                 "source": self.name}
 
+    def get_headlines(self, ticker: str | None = None, limit: int = 8) -> list:
+        """Recent headlines for a ticker, or broad-market news when ticker is None."""
+        params = {"limit": limit}
+        if ticker:
+            params["ticker"] = ticker
+        d = self._cached("news", ticker or "_market", 120, "/news/", params)
+        items = d.get("news", d) if isinstance(d, dict) else d
+        return [it.get("title") or it.get("headline") for it in (items or [])[:limit]
+                if isinstance(it, dict) and (it.get("title") or it.get("headline"))]
+
     def get_news_sentiment(self, ticker: str) -> dict:
         d = self._cached("news", ticker, 120, "/news/", {"ticker": ticker, "limit": 50})
         items = d.get("news", d) if isinstance(d, dict) else d

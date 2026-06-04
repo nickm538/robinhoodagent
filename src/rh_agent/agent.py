@@ -32,6 +32,7 @@ class ScanResult:
     universe_size: int
     scored_size: int
     td_map: dict = field(default_factory=dict)
+    ai_market_read: str = ""
 
 
 @dataclass
@@ -53,6 +54,8 @@ class TradingAgent:
         self.md = MarketData(cfg, self.providers)
         self.scorer = Scorer(cfg)
         self.builder = PortfolioBuilder(cfg)
+        from .analysts.ai_analyst import AIAnalyst
+        self.ai = AIAnalyst(cfg)
         self._quote_cache: dict[str, float | None] = {}
 
     # ---- helpers ----
@@ -117,12 +120,55 @@ class TradingAgent:
                 self._quote_cache[td.ticker] = td.quote.price
         regime = detect_regime(self.md, self.cfg)
         verdicts = self.scorer.score(data, regime)
-        eligible = self.scorer.eligible(verdicts)
         td_map = {td.ticker: td for td in data}
+        ai_read = self._apply_ai_overlay(verdicts, td_map, regime)
+        eligible = self.scorer.eligible(verdicts)
         targets = self.builder.build(eligible, td_map, regime, equity)
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
                           equity=equity, universe_size=len(names), scored_size=len(data),
-                          td_map=td_map)
+                          td_map=td_map, ai_market_read=ai_read)
+
+    def _apply_ai_overlay(self, verdicts, td_map, regime) -> str:
+        """Blend the Claude AI analyst's view into the composite. No-op if the
+        analyst is disabled (no key/SDK) or the call fails."""
+        if not getattr(self, "ai", None) or not self.ai.enabled or not verdicts:
+            return ""
+        top = verdicts[: self.ai.max_candidates]
+        cands = []
+        for v in top:
+            td = td_map.get(v.ticker)
+            if not td:
+                continue
+            f = td.fundamentals
+            cands.append({
+                "ticker": v.ticker, "sector": td.sector,
+                "quant_composite": round(v.composite, 1),
+                "quant_pillars": v.analyst_scores,
+                "fundamentals": {k: round(f[k], 3) for k in
+                                 ("roe", "net_margin", "revenue_growth", "earnings_growth",
+                                  "pe_ratio", "debt_to_equity") if isinstance(f.get(k), (int, float))},
+                "news_sentiment": td.news_sentiment.get("score"),
+                "days_to_earnings": td.earnings.get("days_to_next"),
+                "headlines": self.md.headlines(v.ticker, 5),
+            })
+        ctx = f"Regime: {regime.describe()}. Recent market headlines: {self.md.market_news(8)}"
+        res = self.ai.assess(ctx, cands)
+        if not res.views:
+            return res.market_read or ""
+        w = self.ai.weight
+        for v in verdicts:
+            av = res.views.get(v.ticker)
+            if not av:
+                continue
+            v.analyst_scores["ai_analyst"] = round(av["score"], 1)
+            v.composite = round((1 - w) * v.composite + w * av["score"], 1)
+            v.rationale += f" | AI {av['stance']}: {av['rationale']}"
+            if av["stance"] == "bearish" and av["score"] < 40:
+                v.flags.append("ai_caution")
+        verdicts.sort(key=lambda x: x.composite, reverse=True)
+        log.info("AI overlay: blended %d names (weight %.2f) | %s",
+                 len(res.views), w, res.market_read[:120])
+        return res.market_read or ""
 
     # ---- broker ----
     def make_broker(self):

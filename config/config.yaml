@@ -183,6 +183,20 @@ portfolio:
 # BACKTEST  — walk-forward, real prices, vs benchmark.
 # ----------------------------------------------------------------------
 # ----------------------------------------------------------------------
+# AI ANALYST  — the 6th, LLM-in-the-loop voice (Claude). Optional.
+# Once per rebalance it reviews the shortlist + market news and reasons about
+# catalysts + geopolitical/macro risk, blended into the composite by `weight`.
+# Requires ANTHROPIC_API_KEY and the `anthropic` package; no-ops without them.
+# ----------------------------------------------------------------------
+ai_analyst:
+  enabled: true
+  model: "claude-sonnet-4-6"   # or "claude-opus-4-8" for max reasoning (pricier)
+  effort: "low"                # low | medium | high  (depth vs cost per cycle)
+  weight: 0.25                 # blend: composite = 0.75*quant + 0.25*AI
+  max_candidates: 15           # only the top N quant names are sent to Claude
+  max_tokens: 6000
+
+# ----------------------------------------------------------------------
 # DATA  — concurrency for live full-universe scans (snapshot runs serial).
 # ----------------------------------------------------------------------
 data:

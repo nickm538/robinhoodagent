@@ -27,6 +27,9 @@ def _print(x):
 def render_scan(scan) -> None:
     _print(f"\n[bold]Regime:[/bold] {scan.regime.describe()}" if _con
            else f"\nRegime: {scan.regime.describe()}")
+    if getattr(scan, "ai_market_read", ""):
+        _print(f"[bold]AI market read:[/bold] {scan.ai_market_read}" if _con
+               else f"AI market read: {scan.ai_market_read}")
     _print(f"Universe scanned: {scan.universe_size} | priced & scored: {scan.scored_size} "
            f"| eligible: {len(scan.eligible)} | target book: {len(scan.targets)} "
            f"| equity ${scan.equity:,.0f}")
@@ -98,6 +101,8 @@ def write_markdown(scan, path: str | Path | None = None, *, run=None) -> Path:
     L = []
     L.append(f"# rh-agent target book — {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}\n")
     L.append(f"**Regime:** {scan.regime.describe()}\n")
+    if getattr(scan, "ai_market_read", ""):
+        L.append(f"**AI market read:** {scan.ai_market_read}\n")
     L.append(f"- Universe scanned: **{scan.universe_size}**, scored: **{scan.scored_size}**, "
              f"eligible: **{len(scan.eligible)}**, positions: **{len(scan.targets)}**")
     L.append(f"- Sizing equity: **${scan.equity:,.0f}**\n")
