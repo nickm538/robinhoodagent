@@ -89,5 +89,29 @@ def test_robinhood_tool_mapping_official_names():
     assert m["buying_power"] == "get_portfolio"
     assert m["cancel"] == "cancel_equity_order"
     assert pick_account_number(
-        {"accounts": [{"account_number": "A1", "type": "brokerage"},
-                      {"account_number": "A2", "type": "agentic"}]}) == "A2"
+        {"accounts": [{"account_number": "A1", "agentic_allowed": False},
+                      {"account_number": "A2", "agentic_allowed": True}]}) == "A2"
+
+
+def test_robinhood_account_pick_and_order_args():
+    from rh_agent.broker.robinhood_mcp import order_args, pick_account_number
+    # real get_accounts shape: nested data.accounts; pick agentic_allowed=true
+    accts = {"data": {"accounts": [
+        {"account_number": "NONAGENTIC", "agentic_allowed": False},
+        {"account_number": "AGENT123", "agentic_allowed": True, "deactivated": False}]}}
+    assert pick_account_number(accts) == "AGENT123"
+    # single-account object (some servers) — not a list/envelope
+    assert pick_account_number({"account_number": "SOLO", "agentic_allowed": True}) == "SOLO"
+
+    allowed = {"account_number", "symbol", "side", "type", "quantity", "dollar_amount",
+               "limit_price", "stop_price", "time_in_force", "market_hours", "ref_id"}
+    # market $ buy -> dollar_amount STRING; live -> ref_id; only allowed keys
+    a = order_args(Order("AAPL", "buy", None, "market", notional=100.0),
+                   dry_run=False, account_number="AGENT123")
+    assert a["dollar_amount"] == "100.00" and a["type"] == "market"
+    assert a["account_number"] == "AGENT123" and "ref_id" in a
+    assert set(a) <= allowed, set(a) - allowed
+    assert not ({"ticker", "shares", "notional", "action", "order_type"} & set(a))
+    # sell -> quantity STRING; dry-run -> no ref_id
+    s = order_args(Order("MSFT", "sell", 1.5, "market"), dry_run=True, account_number="X")
+    assert s["quantity"] == "1.5" and "ref_id" not in s
