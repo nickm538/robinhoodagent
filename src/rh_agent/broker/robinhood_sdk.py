@@ -19,6 +19,17 @@ from .robinhood_mcp import discover_tool_map, order_args, parse_account, pick_ac
 log = get_logger("broker.rh_sdk")
 
 
+def _unwrap_exc(e: BaseException) -> BaseException:
+    """Drill into anyio / 3.11 ExceptionGroups to the first underlying error."""
+    for _ in range(10):
+        subs = getattr(e, "exceptions", None)
+        if subs:
+            e = subs[0]
+        else:
+            break
+    return e
+
+
 def _extract(res):
     """Pull a plain value out of an mcp CallToolResult."""
     if getattr(res, "isError", False):
@@ -57,7 +68,10 @@ class RobinhoodSDKBroker(Broker):
         from mcp.client.streamable_http import streamablehttp_client
 
         provider = make_provider(self.url, interactive=False)
-        async with streamablehttp_client(self.url, auth=provider) as (read, write, _):
+        # terminate_on_close=False: Robinhood rejects the MCP session-cleanup
+        # DELETE with a 400, which anyio otherwise surfaces as a TaskGroup crash.
+        async with streamablehttp_client(self.url, auth=provider,
+                                         terminate_on_close=False) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 if self._map is None:
@@ -67,7 +81,10 @@ class RobinhoodSDKBroker(Broker):
                 return await coro_fn(session)
 
     def _run(self, coro_fn):
-        return asyncio.run(self._session(coro_fn))
+        try:
+            return asyncio.run(self._session(coro_fn))
+        except BaseException as e:          # unwrap TaskGroup/ExceptionGroup to the real cause
+            raise _unwrap_exc(e) from None
 
     async def _call(self, session, cap: str, args: dict | None = None):
         tool = (self._map or {}).get(cap)
@@ -119,7 +136,12 @@ class RobinhoodSDKBroker(Broker):
                 return {"note": "no review tool available; nothing transmitted"}
             return await self._call(session, "place_order", args)
 
-        detail = self._run(fn)
+        try:
+            detail = self._run(fn)
+        except Exception as e:                  # one bad order must not crash the whole run
+            log.error("place_order %s failed: %s", order.ticker, e)
+            return {"status": "error", "ticker": order.ticker, "side": order.side,
+                    "error": str(e)}
         return {"status": "preview" if dry_run else "submitted",
                 "ticker": order.ticker, "result": detail}
 
