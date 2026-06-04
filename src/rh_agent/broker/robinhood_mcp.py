@@ -90,6 +90,10 @@ def pick_account_number(raw) -> str | None:
     """Select the Agentic account (agentic_allowed=true) — the only one the
     agent may trade — from a get_accounts response."""
     rows = [r for r in _unwrap_rows(raw, ["accounts", "results"]) if isinstance(r, dict)]
+    if not rows:  # some servers return a single account object, not a list/envelope
+        d = raw.get("data", raw) if isinstance(raw, dict) else raw
+        if isinstance(d, dict) and (d.get("account_number") or d.get("account_id") or d.get("id")):
+            rows = [d]
     agentic = [r for r in rows if r.get("agentic_allowed") is True and not r.get("deactivated")]
     for r in (agentic or rows):
         num = (r.get("account_number") or r.get("rhs_account_number")

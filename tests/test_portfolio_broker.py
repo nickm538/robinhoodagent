@@ -100,6 +100,8 @@ def test_robinhood_account_pick_and_order_args():
         {"account_number": "NONAGENTIC", "agentic_allowed": False},
         {"account_number": "AGENT123", "agentic_allowed": True, "deactivated": False}]}}
     assert pick_account_number(accts) == "AGENT123"
+    # single-account object (some servers) — not a list/envelope
+    assert pick_account_number({"account_number": "SOLO", "agentic_allowed": True}) == "SOLO"
 
     allowed = {"account_number", "symbol", "side", "type", "quantity", "dollar_amount",
                "limit_price", "stop_price", "time_in_force", "market_hours", "ref_id"}
