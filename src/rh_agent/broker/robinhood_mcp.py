@@ -104,10 +104,20 @@ def pick_account_number(raw) -> str | None:
 
 
 def parse_account(prof, positions_raw, account_number: str | None) -> Account:
-    bp = _walk_num(prof, "buying_power") if prof else None
-    equity = (_walk_num(prof, "total_equity", "portfolio_value", "total_market_value",
-                        "market_value", "equity") if prof else None)
-    cash = _walk_num(prof, "cash", "uninvested", "settled_funds") if prof else None
+    # Robinhood get_portfolio: data.total_value / data.cash / data.buying_power.buying_power
+    # (all strings). get_equity_positions: data.positions[].
+    d = prof.get("data", prof) if isinstance(prof, dict) else {}
+    d = d if isinstance(d, dict) else {}
+    equity = _to_num(d.get("total_value"))
+    if equity is None:
+        equity = _walk_num(prof, "total_value", "total_equity", "portfolio_value")
+    cash = _to_num(d.get("cash"))
+    if cash is None:
+        cash = _walk_num(prof, "cash")
+    bp_obj = d.get("buying_power")
+    bp = _to_num(bp_obj.get("buying_power")) if isinstance(bp_obj, dict) else _to_num(bp_obj)
+    if bp is None:
+        bp = _walk_num(prof, "buying_power")
 
     positions = []
     for p in _unwrap_rows(positions_raw, ["positions", "results"]):

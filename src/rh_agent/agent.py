@@ -107,7 +107,8 @@ class TradingAgent:
     # ---- scan & score ----
     def scan(self, equity: float | None = None, limit: int | None = None,
              tickers: list[str] | None = None) -> ScanResult:
-        equity = equity or self.default_equity()
+        if equity is None:                 # 0.0 is a valid (empty-account) sizing -> keep it
+            equity = self.default_equity()
         names = self.universe(limit, watchlist=tickers)
         log.info("scanning %d tickers", len(names))
         data = self._gather(names, deep=True)
@@ -156,7 +157,17 @@ class TradingAgent:
     def run(self, execute: bool = False, tickers: list[str] | None = None) -> RunResult:
         broker = self.make_broker()
         account = broker.get_account()
-        scan = self.scan(equity=account.equity or self.default_equity(), tickers=tickers)
+        # NEVER size a LIVE account on the paper default. If a live balance reads
+        # as 0 (e.g. a portfolio-fetch hiccup), skip the cycle ENTIRELY — no scan,
+        # no orders — rather than risk over-sizing on the default equity.
+        if broker.supports_live and not (account.equity and account.equity > 0):
+            log.error("live account equity read as 0 — skipping cycle entirely (no orders)")
+            empty = ScanResult(regime=RegimeResult("halted", {}, 0.0), verdicts=[], eligible=[],
+                               targets=[], equity=0.0, universe_size=0, scored_size=0)
+            return RunResult(scan=empty, account=account, orders=[], fills=[], executed=False,
+                             mode="live")
+        equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
+        scan = self.scan(equity=equity, tickers=tickers)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn)
 
         live = self.cfg.live_trading_armed and broker.supports_live
