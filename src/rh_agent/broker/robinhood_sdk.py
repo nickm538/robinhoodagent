@@ -83,8 +83,8 @@ class RobinhoodSDKBroker(Broker):
     def _run(self, coro_fn):
         try:
             return asyncio.run(self._session(coro_fn))
-        except BaseException as e:          # unwrap TaskGroup/ExceptionGroup to the real cause
-            raise _unwrap_exc(e) from None
+        except Exception as e:              # unwrap TaskGroup/ExceptionGroup to the real cause
+            raise _unwrap_exc(e) from None  # (Exception still covers anyio ExceptionGroup)
 
     async def _call(self, session, cap: str, args: dict | None = None):
         tool = (self._map or {}).get(cap)

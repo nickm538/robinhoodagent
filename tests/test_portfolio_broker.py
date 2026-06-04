@@ -117,6 +117,17 @@ def test_robinhood_account_pick_and_order_args():
     assert s["quantity"] == "1.5" and "ref_id" not in s
 
 
+def test_robinhood_sdk_place_order_returns_error_dict():
+    # a failing order must return an error dict, not crash the rebalance loop
+    from rh_agent.broker.robinhood_sdk import RobinhoodSDKBroker
+    b = RobinhoodSDKBroker.__new__(RobinhoodSDKBroker)   # skip __init__ (no SDK/token needed)
+    b.url, b.account_number, b._map = "x", "A", {"place_order": "place_equity_order"}
+    b._run = lambda fn: (_ for _ in ()).throw(RuntimeError("upstream 400"))
+    res = b.place_order(Order("AAPL", "buy", None, "market", notional=70.0), dry_run=False)
+    assert res["status"] == "error" and "upstream 400" in res["error"]
+    assert res["ticker"] == "AAPL"
+
+
 def test_robinhood_parse_account_portfolio_shape():
     # real get_portfolio shape: nested data with string values; buying_power nested
     from rh_agent.broker.robinhood_mcp import parse_account
