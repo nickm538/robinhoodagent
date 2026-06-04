@@ -128,3 +128,8 @@ def test_robinhood_parse_account_portfolio_shape():
     assert acct.cash == 412.50
     assert acct.buying_power == 400.00
     assert acct.account_number == "AGENT123" and not acct.positions
+    # a genuinely empty account: total_value "0.00" must stay 0.0, not be masked
+    flat = parse_account({"data": {"total_value": "0.00", "cash": "0.00",
+                                   "buying_power": {"buying_power": "0.00"}}},
+                         {"data": {"positions": []}}, "AGENT123")
+    assert flat.equity == 0.0 and flat.buying_power == 0.0

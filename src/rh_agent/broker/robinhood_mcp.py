@@ -108,8 +108,9 @@ def parse_account(prof, positions_raw, account_number: str | None) -> Account:
     # (all strings). get_equity_positions: data.positions[].
     d = prof.get("data", prof) if isinstance(prof, dict) else {}
     d = d if isinstance(d, dict) else {}
-    equity = _to_num(d.get("total_value")) or _walk_num(prof, "total_value", "total_equity",
-                                                        "portfolio_value")
+    equity = _to_num(d.get("total_value"))
+    if equity is None:
+        equity = _walk_num(prof, "total_value", "total_equity", "portfolio_value")
     cash = _to_num(d.get("cash"))
     if cash is None:
         cash = _walk_num(prof, "cash")
