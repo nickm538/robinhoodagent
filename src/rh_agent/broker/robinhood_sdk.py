@@ -191,7 +191,19 @@ async def _probe(url: str, sample_ticker: str) -> dict:
             if mp.get("quote"):
                 try:
                     out["shapes"]["quote"] = _shape(
-                        await call(mp["quote"], {"symbol": sample_ticker, "symbols": sample_ticker}))
+                        await call(mp["quote"], {"symbols": [sample_ticker]}))
                 except Exception as e:
                     out["shapes"]["quote_error"] = str(e)
+            # simulate a tiny $1 market buy via review (places NO order) to
+            # validate that our order builder matches the real schema
+            if mp.get("review_order") and acct:
+                sample = order_args(Order(sample_ticker, "buy", None, "market", notional=1.0),
+                                    dry_run=True, account_number=acct)
+                out["review_sample_args"] = {k: v for k, v in sample.items()
+                                             if k != "account_number"}
+                try:
+                    out["shapes"]["review_order"] = _shape(await call(mp["review_order"], sample))
+                    out["review_ok"] = True
+                except Exception as e:
+                    out["shapes"]["review_error"] = str(e)
     return out

@@ -41,22 +41,121 @@ _PATTERNS = {
 }
 
 
+def _to_num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _unwrap_rows(raw, keys: list[str]) -> list:
+    """Pull a list out of Robinhood's {data: {<key>: [...]}} envelopes."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        d = raw.get("data", raw)
+        if isinstance(d, list):
+            return d
+        if isinstance(d, dict):
+            for k in keys:
+                if isinstance(d.get(k), list):
+                    return d[k]
+    return []
+
+
+def _walk_num(obj, *subs):
+    """First numeric whose key contains any of the substrings (recursive)."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool) \
+                    and any(s in k.lower() for s in subs):
+                return float(v)
+            if isinstance(v, str) and any(s in k.lower() for s in subs):
+                n = _to_num(v)
+                if n is not None:
+                    return n
+        for v in obj.values():
+            r = _walk_num(v, *subs)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _walk_num(v, *subs)
+            if r is not None:
+                return r
+    return None
+
+
 def pick_account_number(raw) -> str | None:
-    """Extract an account number from a get_accounts response, preferring the
-    Agentic account (the only one an agent may trade)."""
-    if isinstance(raw, dict) and raw.get("account_number"):
-        return raw["account_number"]
-    rows = raw if isinstance(raw, list) else (
-        (raw.get("accounts") or raw.get("results") or []) if isinstance(raw, dict) else [])
-    rows = [r for r in rows if isinstance(r, dict)]
-    agentic = [r for r in rows if "agentic" in
-               (str(r.get("type", "")) + str(r.get("brokerage_account_type", ""))
-                + str(r.get("account_type", ""))).lower()]
+    """Select the Agentic account (agentic_allowed=true) — the only one the
+    agent may trade — from a get_accounts response."""
+    rows = [r for r in _unwrap_rows(raw, ["accounts", "results"]) if isinstance(r, dict)]
+    agentic = [r for r in rows if r.get("agentic_allowed") is True and not r.get("deactivated")]
     for r in (agentic or rows):
-        num = r.get("account_number") or r.get("account_id") or r.get("id")
+        num = (r.get("account_number") or r.get("rhs_account_number")
+               or r.get("account_id") or r.get("id"))
         if num:
             return str(num)
     return None
+
+
+def parse_account(prof, positions_raw, account_number: str | None) -> Account:
+    bp = _walk_num(prof, "buying_power") if prof else None
+    equity = (_walk_num(prof, "total_equity", "portfolio_value", "total_market_value",
+                        "market_value", "equity") if prof else None)
+    cash = _walk_num(prof, "cash", "uninvested", "settled_funds") if prof else None
+
+    positions = []
+    for p in _unwrap_rows(positions_raw, ["positions", "results"]):
+        if not isinstance(p, dict):
+            continue
+        qty = _to_num(p.get("quantity") or p.get("shares"))
+        if not qty:
+            continue
+        avg = _to_num(p.get("average_buy_price") or p.get("average_cost")
+                      or p.get("cost_basis") or p.get("avg_price")) or 0.0
+        px = _to_num(p.get("price") or p.get("current_price") or p.get("last_price")) or avg
+        positions.append(Position(ticker=p.get("symbol") or p.get("ticker"), quantity=qty,
+                                  avg_price=avg, current_price=px,
+                                  market_value=round(qty * px, 2)))
+    if not equity:
+        equity = (cash or 0.0) + sum(p.market_value for p in positions)
+    return Account(equity=round(equity or 0.0, 2), cash=round(cash or 0.0, 2),
+                   buying_power=round(bp if bp is not None else (cash or equity or 0.0), 2),
+                   positions=positions, account_number=account_number or "agentic",
+                   source="robinhood")
+
+
+def _fmt_num(x) -> str:
+    return f"{float(x):.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def order_args(order: Order, dry_run: bool, account_number: str | None) -> dict:
+    """Build args matching Robinhood's place/review_equity_order schema exactly
+    (additionalProperties:false — only these keys; quantities are strings)."""
+    otype = order.order_type or "market"
+    args: dict = {"symbol": order.ticker, "side": order.side, "type": otype,
+                  "time_in_force": order.time_in_force or "gfd"}
+    if account_number:
+        args["account_number"] = account_number
+
+    if otype == "market" and order.side == "buy" and order.notional:
+        args["dollar_amount"] = f"{float(order.notional):.2f}"   # fractional $ buy
+    elif order.quantity is not None:
+        args["quantity"] = _fmt_num(order.quantity)              # share quantity
+    elif order.notional and otype == "market":
+        args["dollar_amount"] = f"{float(order.notional):.2f}"
+
+    if otype in ("limit", "stop_limit") and order.limit_price:
+        args["limit_price"] = f"{float(order.limit_price):.2f}"
+        args.pop("dollar_amount", None)                          # limit needs quantity, not $
+        if "quantity" not in args and order.quantity is not None:
+            args["quantity"] = _fmt_num(order.quantity)
+
+    if not dry_run:                                              # idempotency key for live places
+        import uuid
+        args["ref_id"] = str(uuid.uuid4())
+    return args
 
 
 def discover_tool_map(names: list[str]) -> dict:
