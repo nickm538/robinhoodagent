@@ -170,55 +170,6 @@ def discover_tool_map(names: list[str]) -> dict:
     return mp
 
 
-# Shared parsers so both the lightweight and SDK brokers return identical shapes.
-def parse_account(prof, positions_raw, account_number: str | None) -> Account:
-    cash = bp = equity = 0.0
-    d = prof[0] if isinstance(prof, list) and prof else prof
-    if isinstance(d, dict):
-        cash = float(d.get("cash") or d.get("buying_power") or 0)
-        bp = float(d.get("buying_power") or cash)
-        equity = float(d.get("equity") or d.get("portfolio_equity") or 0)
-    positions = []
-    rows = positions_raw if isinstance(positions_raw, list) else (
-        positions_raw.get("positions", []) if isinstance(positions_raw, dict) else [])
-    for p in rows:
-        if not isinstance(p, dict):
-            continue
-        qty = float(p.get("quantity") or p.get("shares") or 0)
-        if qty == 0:
-            continue
-        px = float(p.get("price") or p.get("current_price") or p.get("last_price") or 0)
-        positions.append(Position(
-            ticker=p.get("symbol") or p.get("ticker"), quantity=qty,
-            avg_price=float(p.get("average_buy_price") or p.get("avg_price") or 0),
-            current_price=px, market_value=round(qty * px, 2)))
-    if equity == 0:
-        equity = cash + sum(p.market_value for p in positions)
-    return Account(equity=round(equity, 2), cash=round(cash, 2), buying_power=round(bp or cash, 2),
-                   positions=positions, account_number=account_number or "agentic", source="robinhood")
-
-
-def order_args(order: Order, dry_run: bool, account_number: str | None) -> dict:
-    args = {
-        "symbol": order.ticker, "ticker": order.ticker,
-        "side": order.side, "action": order.side,
-        "order_type": order.order_type, "type": order.order_type,
-        "time_in_force": order.time_in_force, "dry_run": dry_run,
-    }
-    if order.quantity:
-        args["quantity"] = round(order.quantity, 6)
-        args["shares"] = round(order.quantity, 6)
-    if order.notional:
-        args["amount"] = round(order.notional, 2)
-        args["notional"] = round(order.notional, 2)
-    if order.order_type == "limit" and order.limit_price:
-        args["limit_price"] = round(order.limit_price, 2)
-        args["price"] = round(order.limit_price, 2)
-    if account_number:
-        args["account_number"] = account_number
-    return args
-
-
 class RobinhoodMCPBroker(Broker):
     name = "robinhood"
     supports_live = True

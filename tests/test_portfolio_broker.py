@@ -89,8 +89,8 @@ def test_robinhood_tool_mapping_official_names():
     assert m["buying_power"] == "get_portfolio"
     assert m["cancel"] == "cancel_equity_order"
     assert pick_account_number(
-        {"accounts": [{"account_number": "A1", "type": "brokerage"},
-                      {"account_number": "A2", "type": "agentic"}]}) == "A2"
+        {"accounts": [{"account_number": "A1", "agentic_allowed": False},
+                      {"account_number": "A2", "agentic_allowed": True}]}) == "A2"
 
 
 def test_robinhood_account_pick_and_order_args():
