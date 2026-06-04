@@ -115,3 +115,16 @@ def test_robinhood_account_pick_and_order_args():
     # sell -> quantity STRING; dry-run -> no ref_id
     s = order_args(Order("MSFT", "sell", 1.5, "market"), dry_run=True, account_number="X")
     assert s["quantity"] == "1.5" and "ref_id" not in s
+
+
+def test_robinhood_parse_account_portfolio_shape():
+    # real get_portfolio shape: nested data with string values; buying_power nested
+    from rh_agent.broker.robinhood_mcp import parse_account
+    prof = {"data": {"total_value": "412.50", "equity_value": "0.00", "cash": "412.50",
+                     "buying_power": {"buying_power": "400.00",
+                                      "unleveraged_buying_power": "400.00"}}, "guide": "..."}
+    acct = parse_account(prof, {"data": {"positions": []}}, "AGENT123")
+    assert acct.equity == 412.50          # total_value, NOT equity_value (0)
+    assert acct.cash == 412.50
+    assert acct.buying_power == 400.00
+    assert acct.account_number == "AGENT123" and not acct.positions

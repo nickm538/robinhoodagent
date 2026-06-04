@@ -156,7 +156,16 @@ class TradingAgent:
     def run(self, execute: bool = False, tickers: list[str] | None = None) -> RunResult:
         broker = self.make_broker()
         account = broker.get_account()
-        scan = self.scan(equity=account.equity or self.default_equity(), tickers=tickers)
+        # NEVER size a LIVE account on the paper default: if a live balance reads
+        # as 0 (e.g. a portfolio-fetch hiccup), skip the cycle rather than over-size.
+        if account.equity and account.equity > 0:
+            equity = account.equity
+        elif broker.supports_live:
+            log.error("live account equity read as 0 — skipping this cycle (no orders placed)")
+            equity = 0.0
+        else:
+            equity = self.default_equity()
+        scan = self.scan(equity=equity, tickers=tickers)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn)
 
         live = self.cfg.live_trading_armed and broker.supports_live
