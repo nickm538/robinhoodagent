@@ -31,6 +31,7 @@ _KEY_ENV = {
     "alphavantage": ["ALPHAVANTAGE_API_KEY", "ALPHA_VANTAGE_API_KEY", "AV_API_KEY"],
     "twelvedata": ["TWELVEDATA_API_KEY", "TwelveData_API_KEY", "TWELVE_DATA_API_KEY"],
     "exa": ["EXA_API_KEY"],
+    "anthropic": ["ANTHROPIC_API_KEY"],
 }
 
 

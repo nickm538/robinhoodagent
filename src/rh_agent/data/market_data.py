@@ -116,6 +116,29 @@ class MarketData:
                 continue
         return []
 
+    # ---- news headlines (for the AI analyst) ----
+    def headlines(self, ticker: str, limit: int = 6) -> list:
+        for p in self.providers.values():
+            if hasattr(p, "get_headlines"):
+                try:
+                    h = p.get_headlines(ticker, limit)
+                    if h:
+                        return h
+                except Exception:
+                    continue
+        return []
+
+    def market_news(self, limit: int = 8) -> str:
+        for p in self.providers.values():
+            if hasattr(p, "get_headlines"):
+                try:
+                    h = p.get_headlines(None, limit)
+                    if h:
+                        return " | ".join(h)
+                except Exception:
+                    continue
+        return ""
+
     # ---- full assembly ----
     def build(self, ticker: str, *, deep: bool = True,
               price_start: str | None = None) -> TickerData:
