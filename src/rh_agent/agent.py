@@ -68,8 +68,9 @@ class TradingAgent:
         return px
 
     def universe(self, limit: int | None = None, watchlist: list[str] | None = None) -> list[str]:
-        # explicit --tickers, else config universe.watchlist, else full build
-        wl = watchlist or self.cfg.get("universe.watchlist") or []
+        # explicit --tickers (even if empty) overrides config universe.watchlist;
+        # only fall back to config when no watchlist was passed at all.
+        wl = watchlist if watchlist is not None else (self.cfg.get("universe.watchlist") or [])
         if wl:
             tickers = [t.strip().upper() for t in wl if t and t.strip()]
             return tickers[:limit] if limit else tickers

@@ -63,7 +63,11 @@ def cmd_status(args) -> int:
 
 
 def _watchlist(args):
-    return [t.strip().upper() for t in args.tickers.split(",")] if getattr(args, "tickers", None) else None
+    raw = getattr(args, "tickers", None)
+    if not raw:
+        return None
+    items = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    return items or None
 
 
 def cmd_scan(args) -> int:
