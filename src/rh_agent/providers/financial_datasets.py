@@ -92,11 +92,19 @@ class FinancialDatasetsProvider(DataProvider):
 
     def get_prices(self, ticker: str, start: str | None = None, end: str | None = None,
                    interval: str = "day") -> pd.DataFrame:
-        params = {"ticker": ticker, "interval": interval, "interval_multiplier": 1}
-        if start:
-            params["start_date"] = start
-        if end:
-            params["end_date"] = end
+        # /prices/ REQUIRES start_date AND end_date — omitting them returns HTTP 400.
+        # Anchor the default ~2y window on the *resolved end* (not always today) so an
+        # end-only call can't yield start > end (which would 400 / return empty).
+        from datetime import date, timedelta
+        end = end or date.today().isoformat()
+        if not start:
+            try:
+                anchor = date.fromisoformat(end)
+            except ValueError:
+                anchor = date.today()
+            start = (anchor - timedelta(days=730)).isoformat()
+        params = {"ticker": ticker, "interval": interval, "interval_multiplier": 1,
+                  "start_date": start, "end_date": end}
         d = self._cached("prices", ticker, 720, "/prices/", params)
         recs = d.get("prices", d) if isinstance(d, dict) else d
         return prices_to_df(recs or [])

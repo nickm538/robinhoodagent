@@ -174,8 +174,23 @@ class MboumProvider(DataProvider):
 
     # ------------------------------------------------------------------ institutional
     def get_institutional(self, ticker: str) -> dict:
+        # institutional-holdings REQUIRES `type` (TOTAL|INCREASED|NEW) — omitting it -> HTTP 422.
         d = _unwrap(self._cached("inst", 1440, "/v2/markets/stock/institutional-holdings",
-                                 {"ticker": ticker}))
+                                 {"ticker": ticker, "type": "TOTAL"}))
+        # Documented shape: {ownershipSummary{...}, activePositions{increased,decreased,new}}.
+        if isinstance(d, dict) and ("activePositions" in d or "ownershipSummary" in d):
+            active = d.get("activePositions") if isinstance(d.get("activePositions"), dict) else {}
+            summ = d.get("ownershipSummary") if isinstance(d.get("ownershipSummary"), dict) else {}
+            inc = _first(active, "increasedPositions", "increased", "positionsIncreased", default=0) or 0
+            dec = _first(active, "decreasedPositions", "decreased", "positionsDecreased", default=0) or 0
+            new = _first(active, "newPositions", "new", default=0) or 0
+            holders = _first(summ, "institutionsCount", "totalInstitutions", "totalHolders") or (inc + dec + new)
+            net = ((inc - dec) / (inc + dec)) if isinstance(inc, (int, float)) \
+                and isinstance(dec, (int, float)) and (inc + dec) > 0 else None
+            if net is None:           # no usable signal -> fall through to the next provider
+                raise ProviderUnsupported
+            return {"holders": holders, "net_change_pct": net, "source": self.name}
+        # Fallback: a flat list of holders with per-row change.
         recs = d if isinstance(d, list) else (d.get("ownershipList") if isinstance(d, dict) else None)
         if not recs:
             raise ProviderUnsupported
