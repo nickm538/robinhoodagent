@@ -176,7 +176,7 @@ portfolio:
   cash_floor: 0.02
   rebalance:
     schedule: "intraday"         # re-rank ~2x/session — reactive to catalysts, not frozen weekly
-    intraday_hours: 3            # cadence when schedule == intraday (re-rank every N hours)
+    intraday_hours: 1            # hourly re-rank to capture intraday moves (no_trade_band + turnover cap still damp churn)
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
