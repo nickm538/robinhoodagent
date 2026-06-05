@@ -113,19 +113,34 @@ class TradingAgent:
         if equity is None:                 # 0.0 is a valid (empty-account) sizing -> keep it
             equity = self.default_equity()
         names = self.universe(limit, watchlist=tickers)
-        log.info("scanning %d tickers", len(names))
+        full_n = len(names)
+        regime = detect_regime(self.md, self.cfg)
+
+        # Two-stage funnel: on a broad universe, cheaply light-rank everything on
+        # fast signals (momentum/quality from prices+fundamentals), then run the
+        # full deep scan + AI analyst on only the top survivors. Keeps big scans
+        # tractable on small hardware without losing the wide hunt.
+        u = self.cfg.get("universe", {}) or {}
+        threshold = int(u.get("two_stage_threshold", 40))
+        top_k = int(u.get("deep_top_k", 30))
+        if full_n > threshold and "snapshot" not in self.providers:
+            log.info("two-stage scan: light-screening %d names -> deep top %d", full_n, top_k)
+            light = self._gather(names, deep=False)
+            light_v = self.scorer.score(light, regime)
+            names = [v.ticker for v in light_v[:top_k]]
+
+        log.info("deep-scoring %d tickers", len(names))
         data = self._gather(names, deep=True)
         for td in data:
             if td.quote:
                 self._quote_cache[td.ticker] = td.quote.price
-        regime = detect_regime(self.md, self.cfg)
         verdicts = self.scorer.score(data, regime)
         td_map = {td.ticker: td for td in data}
         ai_read = self._apply_ai_overlay(verdicts, td_map, regime)
         eligible = self.scorer.eligible(verdicts)
         targets = self.builder.build(eligible, td_map, regime, equity)
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
-                          equity=equity, universe_size=len(names), scored_size=len(data),
+                          equity=equity, universe_size=full_n, scored_size=len(data),
                           td_map=td_map, ai_market_read=ai_read)
 
     def _apply_ai_overlay(self, verdicts, td_map, regime) -> str:

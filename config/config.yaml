@@ -65,9 +65,13 @@ universe:
   # Hard exclusions
   exclude_sectors: []             # e.g. ["Energy"] to sit out a sector
   blacklist: []                   # tickers to never trade
-  watchlist: []                   # if non-empty, scan ONLY these tickers (focused / 24-7 list);
-                                  # empty = full-universe scan. e.g. ["NVDA","MSFT","AAPL","AVGO"]
-  # Coarse pre-screen (cheap) before deep multi-factor scoring (expensive).
+  # Broad multi-sector hunt incl. mid-cap "diamonds in the rough". [] = full-universe.
+  watchlist: ["NVDA","MSFT","AAPL","GOOGL","AMZN","META","AVGO","ORCL","CRM","AMD","QCOM","NOW","MU","PANW","ANET","CRWD","MRVL","NFLX","TMUS","HD","MCD","NKE","BKNG","UBER","ABNB","CMG","DKNG","CELH","PG","KO","COST","WMT","LLY","UNH","JNJ","ABBV","MRK","TMO","ISRG","VRTX","HIMS","JPM","BAC","GS","BLK","SPGI","AXP","V","MA","COIN","SOFI","HOOD","CAT","GE","HON","BA","DE","RTX","ETN","VRT","XOM","CVX","LIN","NEE","VST","CEG","PLD","PLTR","SMCI","APP","RKLB","CVNA","AFRM","DUOL","TOST","ELF","ONON","RDDT","ASTS","NET","DDOG","SNOW","TTD","MDB"]
+  # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
+  # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
+  two_stage_threshold: 40         # above this many names, engage the funnel
+  deep_top_k: 30                  # deep-score (+ AI) only the top N from the light pass
+  # Coarse pre-screen (used in auto/full-universe mode).
   prescreen:
     enabled: true
     max_candidates: 250           # deep-score at most this many survivors per run
@@ -160,18 +164,19 @@ normalize:
 # PORTFOLIO CONSTRUCTION & RISK  — veteran discipline.
 # ----------------------------------------------------------------------
 portfolio:
-  target_positions: 15           # concentrated enough to outperform, diversified enough to survive
+  target_positions: 12           # concentrated for alpha, diversified enough to survive a blowup
   min_conviction_score: 60.0     # composite 0..100 floor to be eligible
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
-  max_position_weight: 0.10      # <=10% per name
+  max_position_weight: 0.12      # <=12% per name — conviction tilt without single-name fragility
   min_position_weight: 0.02
   max_sector_weight: 0.35        # diversification cap per GICS sector
   cash_floor: 0.02
   rebalance:
-    schedule: "weekly"           # weekly cadence suits a 1-3 month horizon w/o overtrading
-    no_trade_band: 0.015         # ignore drift < 1.5% to cut turnover/costs
-    max_turnover_per_rebalance: 0.40
+    schedule: "intraday"         # re-rank ~2x/session — reactive to catalysts, not frozen weekly
+    intraday_hours: 3            # cadence when schedule == intraday (re-rank every N hours)
+    no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
+    max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
     stop_loss_atr_mult: 2.5      # trailing stop at 2.5x ATR(14)
     take_profit_atr_mult: 6.0
@@ -192,8 +197,8 @@ ai_analyst:
   enabled: true
   model: "claude-sonnet-4-6"   # or "claude-opus-4-8" for max reasoning (pricier)
   effort: "low"                # low | medium | high  (depth vs cost per cycle)
-  weight: 0.25                 # blend: composite = 0.75*quant + 0.25*AI
-  max_candidates: 15           # only the top N quant names are sent to Claude
+  weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
+  max_candidates: 20           # send the top N quant names to Claude (wider hunt -> review more)
   max_tokens: 6000
 
 # ----------------------------------------------------------------------
