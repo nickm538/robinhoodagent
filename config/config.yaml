@@ -174,6 +174,19 @@ portfolio:
   min_position_weight: 0.02
   max_sector_weight: 0.60        # relaxed for a small 5-name book (light diversification)
   cash_floor: 0.02
+  # AUTO-SCALE the book to the account size. At each rebalance the builder picks
+  # the highest tier whose min-equity <= current equity and uses its position
+  # count + caps (overriding the static target_positions / max_*_weight above).
+  # A growing account widens and diversifies itself — no manual retuning.
+  # Set enabled: false to use the static values. [min_equity, positions, name_cap, sector_cap]
+  autoscale:
+    enabled: true
+    tiers:
+      - [0,      3, 0.40, 0.70]   # micro: a few concentrated names
+      - [400,    5, 0.30, 0.60]   # ~$500 (current)
+      - [2000,   8, 0.18, 0.45]
+      - [10000, 10, 0.14, 0.40]
+      - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
     schedule: "intraday"         # re-rank intraday; buying-power cap keeps a small account safe from over-ordering
     intraday_hours: 2            # every ~2h -> ~3-4 rebalances per session (at least 3x daily)

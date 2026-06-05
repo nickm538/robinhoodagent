@@ -28,6 +28,7 @@ def test_position_and_sector_caps():
     cfg.raw["portfolio"]["max_position_weight"] = 0.10
     cfg.raw["portfolio"]["max_sector_weight"] = 0.35
     cfg.raw["portfolio"]["target_positions"] = 12
+    cfg.raw["portfolio"]["autoscale"] = {"enabled": False}   # exercise the static caps
     builder = PortfolioBuilder(cfg)
     # 8 tech names + 2 others -> tech must be capped at 35%
     verdicts, td_map = [], {}
@@ -172,3 +173,21 @@ def test_build_orders_no_cap_when_cash_ample():
     orders = build_orders(acct, targets, cfg, lambda t: 50.0)
     buys = [o for o in orders if o.side == "buy"]
     assert len(buys) == 1 and buys[0].notional == 1200.0   # full target, no cap
+
+
+def test_autoscale_tiers_by_equity():
+    # the book widens + caps tighten as the account grows across equity tiers
+    cfg = load_config()
+    cfg.raw["portfolio"]["autoscale"] = {
+        "enabled": True,
+        "tiers": [[0, 3, 0.40, 0.70], [400, 5, 0.30, 0.60],
+                  [2000, 8, 0.18, 0.45], [25000, 12, 0.12, 0.35]],
+    }
+    b = PortfolioBuilder(cfg)
+    assert b._autoscale_params(150) == (3, 0.40, 0.70)
+    assert b._autoscale_params(513) == (5, 0.30, 0.60)
+    assert b._autoscale_params(5000) == (8, 0.18, 0.45)
+    assert b._autoscale_params(30000) == (12, 0.12, 0.35)
+    # disabled -> None (builder falls back to the static portfolio caps)
+    cfg.raw["portfolio"]["autoscale"]["enabled"] = False
+    assert PortfolioBuilder(cfg)._autoscale_params(513) is None
