@@ -101,15 +101,17 @@ class AIAnalyst:
     def _client_or_none(self):
         if self._client is not None:
             return self._client
+        # Guard BOTH the import and the constructor — a missing/incompatible SDK
+        # must degrade to a graceful no-op, never abort a rebalance. Bounded
+        # timeout + single retry so a hung call can't wedge the window either
+        # (SDK default is a 600s timeout with 2 retries).
         try:
             import anthropic
-        except Exception:
-            log.warning("AI analyst: `anthropic` SDK not installed (pip install anthropic) — skipping")
+            self._client = anthropic.Anthropic(api_key=self.api_key, timeout=60.0, max_retries=1)
+        except Exception as e:
+            log.warning("AI analyst: client unavailable (%s) — running pure-quant", e)
             self.enabled = False
             return None
-        # Bounded timeout + single retry so a hung/slow API call can't wedge the
-        # rebalance window (SDK default is a 600s timeout with 2 retries).
-        self._client = anthropic.Anthropic(api_key=self.api_key, timeout=60.0, max_retries=1)
         return self._client
 
     def assess(self, market_context: str, candidates: list[dict]) -> AIResult:

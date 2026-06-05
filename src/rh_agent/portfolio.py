@@ -100,7 +100,7 @@ class PortfolioBuilder:
                  len(out), 100 * sum(x.weight for x in out), regime.name)
         return out
 
-    def _autoscale_params(self, equity: float):
+    def _autoscale_params(self, equity: float) -> "tuple[int, float, float] | None":
         """Scale the book to the account size: pick the highest tier whose
         min-equity <= current equity and return (positions, max_name_weight,
         max_sector_weight). Returns None when disabled or misconfigured, so the

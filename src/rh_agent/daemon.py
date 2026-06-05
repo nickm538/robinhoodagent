@@ -67,7 +67,12 @@ class DaemonState:
             try:
                 d = json.loads(STATE.read_text())
                 known = {f.name for f in fields(cls)}
-                return cls(**{k: v for k, v in d.items() if k in known})
+                st = cls(**{k: v for k, v in d.items() if k in known})
+                if not isinstance(st.stops, dict):
+                    st.stops = {}
+                if not isinstance(st.take_profits, dict):
+                    st.take_profits = {}
+                return st
             except Exception as e:
                 log.warning("daemon_state.json unreadable (%s) — starting fresh", e)
         return cls(stops={}, take_profits={})

@@ -166,8 +166,8 @@ normalize:
 # ----------------------------------------------------------------------
 portfolio:
   target_positions: 5            # ~$500 account -> 5 positions ~$85 each, comfortably above the $20 min
-  min_conviction_score: 55.0     # composite floor; book is capped at target_positions anyway,
-                                 # so this just ensures enough candidates clear to fill all 12 slots
+  min_conviction_score: 55.0     # composite floor; the book is capped at the (auto-scaled)
+                                 # target_positions, so this just ensures enough names clear to fill it
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
   max_position_weight: 0.30      # small account: lets the top name tilt while keeping 5 names viable

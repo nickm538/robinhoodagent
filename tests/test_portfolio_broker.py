@@ -191,3 +191,19 @@ def test_autoscale_tiers_by_equity():
     # disabled -> None (builder falls back to the static portfolio caps)
     cfg.raw["portfolio"]["autoscale"]["enabled"] = False
     assert PortfolioBuilder(cfg)._autoscale_params(513) is None
+
+
+def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
+    # a corrupt/garbage state file must never crash the 24/7 loop at boot
+    import rh_agent.daemon as daemon
+    p = tmp_path / "daemon_state.json"
+    monkeypatch.setattr(daemon, "STATE", p)
+    # non-dict stops/take_profits + an unknown key
+    p.write_text('{"last_rebalance":"x","stops":"GARBAGE","take_profits":42,"bogus":1}')
+    st = daemon.DaemonState.load()
+    assert st.stops == {} and st.take_profits == {}      # coerced to dicts
+    assert st.last_rebalance == "x"                       # known field preserved
+    # totally invalid json -> fresh state, no crash
+    p.write_text("{not valid json")
+    st2 = daemon.DaemonState.load()
+    assert st2.stops == {} and st2.take_profits == {}
