@@ -157,7 +157,8 @@ normalize:
   winsorize_sigma: 3.0           # clip outliers at +/- 3 sigma before scoring
   min_factor_coverage: 0.5       # a factor needs >=50% of names to count, else neutralized
   # Require multi-pillar confirmation to make the buy list (kills single-signal noise).
-  min_pillars_passing: 3         # candidate must score >=55 in at least N of 5 analysts
+  min_pillars_passing: 2         # >=2 of 5 pillars confirm — matches live coverage (momentum + quant)
+                                 # reliably have data; deep pillars are sparse. 3 starved the book to 1 name.
   pillar_pass_threshold: 55.0
 
 # ----------------------------------------------------------------------
@@ -165,7 +166,8 @@ normalize:
 # ----------------------------------------------------------------------
 portfolio:
   target_positions: 12           # concentrated for alpha, diversified enough to survive a blowup
-  min_conviction_score: 60.0     # composite 0..100 floor to be eligible
+  min_conviction_score: 55.0     # composite floor; book is capped at target_positions anyway,
+                                 # so this just ensures enough candidates clear to fill all 12 slots
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
   max_position_weight: 0.12      # <=12% per name — conviction tilt without single-name fragility
@@ -174,7 +176,7 @@ portfolio:
   cash_floor: 0.02
   rebalance:
     schedule: "intraday"         # re-rank ~2x/session — reactive to catalysts, not frozen weekly
-    intraday_hours: 3            # cadence when schedule == intraday (re-rank every N hours)
+    intraday_hours: 1            # hourly re-rank to capture intraday moves (no_trade_band + turnover cap still damp churn)
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
