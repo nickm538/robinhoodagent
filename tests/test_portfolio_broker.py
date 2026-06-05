@@ -28,6 +28,7 @@ def test_position_and_sector_caps():
     cfg.raw["portfolio"]["max_position_weight"] = 0.10
     cfg.raw["portfolio"]["max_sector_weight"] = 0.35
     cfg.raw["portfolio"]["target_positions"] = 12
+    cfg.raw["portfolio"]["autoscale"] = {"enabled": False}   # exercise the static caps
     builder = PortfolioBuilder(cfg)
     # 8 tech names + 2 others -> tech must be capped at 35%
     verdicts, td_map = [], {}
@@ -144,3 +145,65 @@ def test_robinhood_parse_account_portfolio_shape():
                                    "buying_power": {"buying_power": "0.00"}}},
                          {"data": {"positions": []}}, "AGENT123")
     assert flat.equity == 0.0 and flat.buying_power == 0.0
+
+
+def test_build_orders_respects_buying_power():
+    # A buy must never exceed available buying power, even when the target weight
+    # (sized against equity) implies a far larger order — else the broker 400s
+    # with "Not enough buying power".
+    from rh_agent.execution import build_orders
+    from rh_agent.models import Account, TargetPosition
+    cfg = load_config()
+    acct = Account(equity=10_000, cash=100.0, buying_power=100.0, positions=[])
+    targets = [TargetPosition("AAA", 0.12, 80, sector="Tech")]   # weight implies ~$1200
+    orders = build_orders(acct, targets, cfg, lambda t: 50.0)
+    buys = [o for o in orders if o.side == "buy"]
+    assert len(buys) == 1
+    assert buys[0].notional <= 100.0                      # capped to buying power...
+    assert buys[0].notional == round(0.97 * 100.0, 2)     # ...minus the slippage cushion
+    assert buys[0].quantity == round(buys[0].notional / 50.0, 4)
+
+
+def test_build_orders_no_cap_when_cash_ample():
+    from rh_agent.execution import build_orders
+    from rh_agent.models import Account, TargetPosition
+    cfg = load_config()
+    acct = Account(equity=10_000, cash=10_000.0, buying_power=10_000.0, positions=[])
+    targets = [TargetPosition("AAA", 0.12, 80, sector="Tech")]
+    orders = build_orders(acct, targets, cfg, lambda t: 50.0)
+    buys = [o for o in orders if o.side == "buy"]
+    assert len(buys) == 1 and buys[0].notional == 1200.0   # full target, no cap
+
+
+def test_autoscale_tiers_by_equity():
+    # the book widens + caps tighten as the account grows across equity tiers
+    cfg = load_config()
+    cfg.raw["portfolio"]["autoscale"] = {
+        "enabled": True,
+        "tiers": [[0, 3, 0.40, 0.70], [400, 5, 0.30, 0.60],
+                  [2000, 8, 0.18, 0.45], [25000, 12, 0.12, 0.35]],
+    }
+    b = PortfolioBuilder(cfg)
+    assert b._autoscale_params(150) == (3, 0.40, 0.70)
+    assert b._autoscale_params(513) == (5, 0.30, 0.60)
+    assert b._autoscale_params(5000) == (8, 0.18, 0.45)
+    assert b._autoscale_params(30000) == (12, 0.12, 0.35)
+    # disabled -> None (builder falls back to the static portfolio caps)
+    cfg.raw["portfolio"]["autoscale"]["enabled"] = False
+    assert PortfolioBuilder(cfg)._autoscale_params(513) is None
+
+
+def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
+    # a corrupt/garbage state file must never crash the 24/7 loop at boot
+    import rh_agent.daemon as daemon
+    p = tmp_path / "daemon_state.json"
+    monkeypatch.setattr(daemon, "STATE", p)
+    # non-dict stops/take_profits + an unknown key
+    p.write_text('{"last_rebalance":"x","stops":"GARBAGE","take_profits":42,"bogus":1}')
+    st = daemon.DaemonState.load()
+    assert st.stops == {} and st.take_profits == {}      # coerced to dicts
+    assert st.last_rebalance == "x"                       # known field preserved
+    # totally invalid json -> fresh state, no crash
+    p.write_text("{not valid json")
+    st2 = daemon.DaemonState.load()
+    assert st2.stops == {} and st2.take_profits == {}

@@ -27,6 +27,9 @@ class PortfolioBuilder:
         min_w = float(self.p.get("min_position_weight", 0.02))
         max_sec = float(self.p.get("max_sector_weight", 0.35))
         tilt = float(self.p.get("conviction_tilt", 0.5))
+        scaled = self._autoscale_params(equity)     # grow the book with the account
+        if scaled:
+            n, max_w, max_sec = scaled
 
         # ---- 1) select top names honouring an approximate sector cap ----
         selected: list[Verdict] = []
@@ -96,6 +99,29 @@ class PortfolioBuilder:
         log.info("portfolio: %d positions, %.0f%% invested (%s regime)",
                  len(out), 100 * sum(x.weight for x in out), regime.name)
         return out
+
+    def _autoscale_params(self, equity: float) -> "tuple[int, float, float] | None":
+        """Scale the book to the account size: pick the highest tier whose
+        min-equity <= current equity and return (positions, max_name_weight,
+        max_sector_weight). Returns None when disabled or misconfigured, so the
+        static portfolio.* caps are used instead."""
+        a = self.p.get("autoscale", {}) or {}
+        if not a.get("enabled"):
+            return None
+        try:
+            tiers = [t for t in (a.get("tiers") or [])
+                     if isinstance(t, (list, tuple)) and len(t) >= 4]
+            usable = [t for t in tiers if equity >= float(t[0])]
+            if not usable:
+                return None
+            t = max(usable, key=lambda x: float(x[0]))
+            n, mw, msec = int(t[1]), float(t[2]), float(t[3])
+        except (TypeError, ValueError):
+            log.warning("autoscale: malformed tiers — using static portfolio caps")
+            return None
+        log.info("autoscale: equity $%.0f -> %d positions, %.0f%% name cap, %.0f%% sector cap",
+                 equity, n, 100 * mw, 100 * msec)
+        return n, mw, msec
 
     @staticmethod
     def _cap(weights: dict, cap: float) -> dict:

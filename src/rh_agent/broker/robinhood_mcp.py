@@ -229,7 +229,11 @@ class RobinhoodMCPBroker(Broker):
             # If the live tool can't preview, return our own preview rather than risk a send.
             return {"status": "preview", "ticker": order.ticker, "side": order.side,
                     "qty": order.quantity, "note": "dry_run (not transmitted unless tool previews)"}
-        res = self._call("place_order", order_args(order, dry_run, self.account_number))
+        try:
+            res = self._call("place_order", order_args(order, dry_run, self.account_number))
+        except Exception as e:
+            log.error("live order FAILED %s %s: %s", order.side, order.ticker, e)
+            return {"status": "error", "ticker": order.ticker, "error": str(e)}
         return {"status": "submitted", "ticker": order.ticker, "result": res}
 
     def get_orders(self) -> list:

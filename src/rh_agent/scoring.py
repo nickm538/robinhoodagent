@@ -80,8 +80,8 @@ class Scorer:
         import os
         min_conf = float(os.getenv("RH_MIN_CONVICTION",
                                    self.cfg.get("portfolio.min_conviction_score", 60.0)))
-        min_pillars = int(os.getenv("RH_MIN_PILLARS",
-                                    self.norm.get("min_pillars_passing", 3)))
+        min_pillars = int(float(os.getenv("RH_MIN_PILLARS",
+                                          self.norm.get("min_pillars_passing", 3))))
         out = [v for v in verdicts
                if v.composite >= min_conf and v.pillars_passing >= min_pillars]
         log.info("eligible: %d/%d names clear conviction>=%.0f & pillars>=%d",

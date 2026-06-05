@@ -36,7 +36,7 @@ providers:
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
   macro:          ["alphavantage"]
   cache_ttl_minutes:
-    quote: 10
+    quote: 3
     prices: 720
     fundamentals: 1440
     insider: 720
@@ -165,18 +165,31 @@ normalize:
 # PORTFOLIO CONSTRUCTION & RISK  — veteran discipline.
 # ----------------------------------------------------------------------
 portfolio:
-  target_positions: 12           # concentrated for alpha, diversified enough to survive a blowup
-  min_conviction_score: 55.0     # composite floor; book is capped at target_positions anyway,
-                                 # so this just ensures enough candidates clear to fill all 12 slots
+  target_positions: 5            # ~$500 account -> 5 positions ~$85 each, comfortably above the $20 min
+  min_conviction_score: 55.0     # composite floor; the book is capped at the (auto-scaled)
+                                 # target_positions, so this just ensures enough names clear to fill it
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
-  max_position_weight: 0.12      # <=12% per name — conviction tilt without single-name fragility
+  max_position_weight: 0.30      # small account: lets the top name tilt while keeping 5 names viable
   min_position_weight: 0.02
-  max_sector_weight: 0.35        # diversification cap per GICS sector
+  max_sector_weight: 0.60        # relaxed for a small 5-name book (light diversification)
   cash_floor: 0.02
+  # AUTO-SCALE the book to the account size. At each rebalance the builder picks
+  # the highest tier whose min-equity <= current equity and uses its position
+  # count + caps (overriding the static target_positions / max_*_weight above).
+  # A growing account widens and diversifies itself — no manual retuning.
+  # Set enabled: false to use the static values. [min_equity, positions, name_cap, sector_cap]
+  autoscale:
+    enabled: true
+    tiers:
+      - [0,      3, 0.40, 0.70]   # micro: a few concentrated names
+      - [400,    5, 0.30, 0.60]   # ~$500 (current)
+      - [2000,   8, 0.18, 0.45]
+      - [10000, 10, 0.14, 0.40]
+      - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "intraday"         # re-rank ~2x/session — reactive to catalysts, not frozen weekly
-    intraday_hours: 1            # hourly re-rank to capture intraday moves (no_trade_band + turnover cap still damp churn)
+    schedule: "intraday"         # re-rank intraday; buying-power cap keeps a small account safe from over-ordering
+    intraday_hours: 2            # every ~2h -> ~3-4 rebalances per session (at least 3x daily)
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
@@ -213,7 +226,7 @@ data:
 # DAEMON  — the always-on autonomous loop.
 # ----------------------------------------------------------------------
 daemon:
-  poll_seconds: 900            # think/act every 15 min
+  poll_seconds: 300            # risk/stop checks every 5 min (faster reaction; rebalance still gated by its own cadence)
   trade_only_when_open: true   # only trade during US market hours
   manage_stops_every_tick: true
 
