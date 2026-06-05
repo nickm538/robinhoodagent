@@ -153,14 +153,21 @@ class MboumProvider(DataProvider):
 
     # ------------------------------------------------------------------ short interest
     def get_short_interest(self, ticker: str) -> dict:
+        # This endpoint REQUIRES `type` — omitting it returns HTTP 422 — and it
+        # answers with an ARRAY of historical reports (index 0 = most recent).
         d = _unwrap(self._cached("short", 1440, "/v2/markets/stock/short-interest",
-                                 {"ticker": ticker}))
-        if not isinstance(d, dict):
+                                 {"ticker": ticker, "type": "STOCKS"}))
+        if isinstance(d, list):
+            d = d[0] if d else {}
+        if not isinstance(d, dict) or not d:
             raise ProviderUnsupported
         return {
-            "short_pct_float": _first(d, "shortPercentOfFloat", "shortPercentFloat", "percentFloat"),
+            "short_pct_float": _first(d, "shortPercentOfFloat", "shortPercentFloat",
+                                      "percentFloat", "shortFloatPercent"),
             "days_to_cover": _first(d, "daysToCover", "shortRatio"),
-            "short_shares": _first(d, "sharesShort"),
+            "short_shares": _first(d, "interest", "sharesShort", "shortInterest"),
+            "avg_daily_volume": _first(d, "avgDailyShareVolume", "averageDailyVolume"),
+            "settlement_date": _first(d, "settlementDate", "date"),
             "source": self.name,
         }
 
