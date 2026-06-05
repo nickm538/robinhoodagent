@@ -86,8 +86,9 @@ class MboumProvider(DataProvider):
 
     # ------------------------------------------------------------------ company / fundamentals
     def get_company(self, ticker: str) -> dict:
+        # ticker-summary REQUIRES `type` (STOCKS|ETF|MUTUALFUNDS|FUTURES) — omitting it -> HTTP 422
         d = _unwrap(self._cached("summary", 1440, "/v2/markets/stock/ticker-summary",
-                                 {"ticker": ticker}))
+                                 {"ticker": ticker, "type": "STOCKS"}))
         if not isinstance(d, dict):
             raise ProviderUnsupported
         return {
