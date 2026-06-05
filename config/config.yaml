@@ -165,18 +165,18 @@ normalize:
 # PORTFOLIO CONSTRUCTION & RISK  — veteran discipline.
 # ----------------------------------------------------------------------
 portfolio:
-  target_positions: 3            # ~$150 account -> a few meaningfully-sized positions, not sub-$20 dust
+  target_positions: 5            # ~$500 account -> 5 positions ~$85 each, comfortably above the $20 min
   min_conviction_score: 55.0     # composite floor; book is capped at target_positions anyway,
                                  # so this just ensures enough candidates clear to fill all 12 slots
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
-  max_position_weight: 0.40      # micro account: 3 names need ~33% each to be invested
+  max_position_weight: 0.30      # small account: lets the top name tilt while keeping 5 names viable
   min_position_weight: 0.02
-  max_sector_weight: 0.70        # relaxed for a 3-name micro book (can't meaningfully diversify $150)
+  max_sector_weight: 0.60        # relaxed for a small 5-name book (light diversification)
   cash_floor: 0.02
   rebalance:
-    schedule: "daily"            # once per session — keeps a small (<$25k) account under PDT/T+1 limits
-    intraday_hours: 0.5          # re-rank every 30 min — ~floor given the ~10-min full scan
+    schedule: "intraday"         # re-rank intraday; buying-power cap keeps a small account safe from over-ordering
+    intraday_hours: 2            # every ~2h -> ~3-4 rebalances per session (at least 3x daily)
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
