@@ -88,7 +88,7 @@ class AIAnalyst:
         self.cfg = cfg
         self.model = os.getenv("RH_AI_MODEL", a.get("model", "claude-sonnet-4-6"))
         self.effort = a.get("effort", "low")          # low|medium|high (cost vs depth)
-        self.weight = float(a.get("weight", 0.25))    # blend weight into composite
+        self.weight = max(0.0, min(1.0, float(a.get("weight", 0.25))))  # blend weight, clamped [0,1]
         self.max_candidates = int(a.get("max_candidates", 15))
         self.max_tokens = int(a.get("max_tokens", 6000))
         self.api_key = Config.api_key("anthropic")
@@ -107,7 +107,9 @@ class AIAnalyst:
             log.warning("AI analyst: `anthropic` SDK not installed (pip install anthropic) — skipping")
             self.enabled = False
             return None
-        self._client = anthropic.Anthropic(api_key=self.api_key)
+        # Bounded timeout + single retry so a hung/slow API call can't wedge the
+        # rebalance window (SDK default is a 600s timeout with 2 retries).
+        self._client = anthropic.Anthropic(api_key=self.api_key, timeout=60.0, max_retries=1)
         return self._client
 
     def assess(self, market_context: str, candidates: list[dict]) -> AIResult:
@@ -156,7 +158,10 @@ class AIAnalyst:
                 score = max(0.0, min(100.0, float(score)))
             except (TypeError, ValueError):
                 continue
-            views[tk] = {"score": score, "stance": a.get("stance", "neutral"),
+            stance = a.get("stance", "neutral")
+            if stance not in ("bullish", "neutral", "bearish"):
+                stance = "neutral"
+            views[tk] = {"score": score, "stance": stance,
                          "rationale": (a.get("rationale") or "")[:160]}
         cr = getattr(resp, "usage", None)
         if cr is not None:

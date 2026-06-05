@@ -64,6 +64,22 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
         # scaling can push small orders under the minimum — drop those (-> cash)
         buys = [o for o in buys if (o.notional or 0) >= min_notional]
 
+    # --- buying-power cap: never order more cash than the account actually has,
+    # or the broker rejects it ("Not enough buying power"). Cushion for the
+    # slippage between our quote and the market fill. ---
+    bp = float(account.buying_power or 0.0)
+    if bp > 0:
+        budget = bp * 0.97
+        buy_total = sum((o.notional or 0) for o in buys)
+        if buy_total > budget:
+            scale = (budget / buy_total) if buy_total else 0.0
+            for o in buys:
+                o.notional = round((o.notional or 0) * scale, 2)
+                px = price_fn(o.ticker) or 0
+                o.quantity = round(o.notional / px, 4) if px else o.quantity
+            log.info("buying-power cap: $%.0f available -> scaled buys by %.2f", bp, scale)
+            buys = [o for o in buys if (o.notional or 0) >= min_notional]
+
     orders.extend(buys)
     log.info("orders: %d (%d sells, %d buys)", len(orders),
              sum(1 for o in orders if o.side == "sell"), len(buys))

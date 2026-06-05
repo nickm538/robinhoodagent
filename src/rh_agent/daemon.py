@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -64,7 +64,12 @@ class DaemonState:
     @classmethod
     def load(cls) -> "DaemonState":
         if STATE.exists():
-            return cls(**json.loads(STATE.read_text()))
+            try:
+                d = json.loads(STATE.read_text())
+                known = {f.name for f in fields(cls)}
+                return cls(**{k: v for k, v in d.items() if k in known})
+            except Exception as e:
+                log.warning("daemon_state.json unreadable (%s) — starting fresh", e)
         return cls(stops={}, take_profits={})
 
     def save(self) -> None:
@@ -99,8 +104,15 @@ class AlwaysOnAgent:
     # -- one cycle --
     def tick(self, execute: bool = False) -> None:
         now = datetime.now(timezone.utc)
+        self.agent.clear_price_cache()   # fresh quotes this tick — stops must not see stale prices
         broker = self.agent.make_broker()
         account = broker.get_account()
+
+        # A live account whose balance fails to read (transient fetch hiccup -> equity 0)
+        # must not drive risk/anchoring/sizing. Skip the whole tick; the next one recovers.
+        if broker.supports_live and not (account.equity and account.equity > 0):
+            log.error("live account equity read as 0 — skipping tick entirely (no risk/rebalance)")
+            return
 
         # reset the daily anchor at the first tick of a new ET day
         today = (now.astimezone(_ET) if _ET else now).strftime("%Y-%m-%d")
@@ -129,9 +141,10 @@ class AlwaysOnAgent:
                     self.state.stops[tp.ticker] = tp.stop_price
                 if tp.take_profit:
                     self.state.take_profits[tp.ticker] = tp.take_profit
-            # forget stops for names no longer held/targeted
+            # forget stops/take-profits for names no longer held
             held = {p.ticker for p in broker.get_account().positions}
             self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
+            self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
             self.state.last_rebalance = now.isoformat()
             log.info("rebalanced: %d targets, %d orders (%s)",
                      len(run.scan.targets), len(run.orders), run.mode)
@@ -172,6 +185,9 @@ class AlwaysOnAgent:
         trade_only_open = self.d.get("trade_only_when_open", True)
         log.info("AlwaysOnAgent started | poll=%ss | mode=%s | live_armed=%s | execute=%s",
                  poll, self.cfg.execution_mode, self.cfg.live_trading_armed, execute)
+        if _ET is None:
+            log.error("zoneinfo/tzdata unavailable — market-hours check falls back to UTC, "
+                      "which is WRONG by ~4-5h. Install tzdata on this host.")
         cycles = 0
         while True:
             try:

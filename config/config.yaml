@@ -36,7 +36,7 @@ providers:
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
   macro:          ["alphavantage"]
   cache_ttl_minutes:
-    quote: 10
+    quote: 3
     prices: 720
     fundamentals: 1440
     insider: 720

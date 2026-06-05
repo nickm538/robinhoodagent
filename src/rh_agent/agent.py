@@ -70,6 +70,11 @@ class TradingAgent:
         self._quote_cache[ticker] = px
         return px
 
+    def clear_price_cache(self) -> None:
+        """Drop cached quotes so the next price_fn refetches. The daemon calls this
+        every tick so stop-loss checks never evaluate against a stale, frozen price."""
+        self._quote_cache.clear()
+
     def universe(self, limit: int | None = None, watchlist: list[str] | None = None) -> list[str]:
         # explicit --tickers (even if empty) overrides config universe.watchlist;
         # only fall back to config when no watchlist was passed at all.
@@ -176,7 +181,7 @@ class TradingAgent:
             if not av:
                 continue
             v.analyst_scores["ai_analyst"] = round(av["score"], 1)
-            v.composite = round((1 - w) * v.composite + w * av["score"], 1)
+            v.composite = round(max(0.0, min(100.0, (1 - w) * v.composite + w * av["score"])), 1)
             v.rationale += f" | AI {av['stance']}: {av['rationale']}"
             if av["stance"] == "bearish" and av["score"] < 40:
                 v.flags.append("ai_caution")

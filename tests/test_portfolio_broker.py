@@ -144,3 +144,31 @@ def test_robinhood_parse_account_portfolio_shape():
                                    "buying_power": {"buying_power": "0.00"}}},
                          {"data": {"positions": []}}, "AGENT123")
     assert flat.equity == 0.0 and flat.buying_power == 0.0
+
+
+def test_build_orders_respects_buying_power():
+    # A buy must never exceed available buying power, even when the target weight
+    # (sized against equity) implies a far larger order — else the broker 400s
+    # with "Not enough buying power".
+    from rh_agent.execution import build_orders
+    from rh_agent.models import Account, TargetPosition
+    cfg = load_config()
+    acct = Account(equity=10_000, cash=100.0, buying_power=100.0, positions=[])
+    targets = [TargetPosition("AAA", 0.12, 80, sector="Tech")]   # weight implies ~$1200
+    orders = build_orders(acct, targets, cfg, lambda t: 50.0)
+    buys = [o for o in orders if o.side == "buy"]
+    assert len(buys) == 1
+    assert buys[0].notional <= 100.0                      # capped to buying power...
+    assert buys[0].notional == round(0.97 * 100.0, 2)     # ...minus the slippage cushion
+    assert buys[0].quantity == round(buys[0].notional / 50.0, 4)
+
+
+def test_build_orders_no_cap_when_cash_ample():
+    from rh_agent.execution import build_orders
+    from rh_agent.models import Account, TargetPosition
+    cfg = load_config()
+    acct = Account(equity=10_000, cash=10_000.0, buying_power=10_000.0, positions=[])
+    targets = [TargetPosition("AAA", 0.12, 80, sector="Tech")]
+    orders = build_orders(acct, targets, cfg, lambda t: 50.0)
+    buys = [o for o in orders if o.side == "buy"]
+    assert len(buys) == 1 and buys[0].notional == 1200.0   # full target, no cap

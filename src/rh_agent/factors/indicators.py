@@ -21,7 +21,9 @@ def rsi(close: pd.Series, period: int = 14) -> float | None:
     down = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
     rs = up / down.replace(0, np.nan)
     val = 100 - 100 / (1 + rs.iloc[-1])
-    return float(val) if pd.notna(val) else 100.0
+    if pd.notna(val):
+        return float(val)
+    return 100.0 if up.iloc[-1] > 0 else 50.0   # all-up -> overbought; flat -> neutral
 
 
 def macd_hist(close: pd.Series, fast=12, slow=26, signal=9) -> float | None:
@@ -79,7 +81,7 @@ def sma(close: pd.Series, period: int) -> float | None:
 
 def compute_indicators(df: pd.DataFrame) -> dict:
     """Compute the standard indicator bundle used by the technicals factor."""
-    if df is None or len(df) < 30:
+    if df is None or len(df) < 30 or "close" not in df.columns:
         return {}
     close = df["close"]
     out: dict = {}
