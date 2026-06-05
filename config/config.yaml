@@ -157,8 +157,8 @@ normalize:
   winsorize_sigma: 3.0           # clip outliers at +/- 3 sigma before scoring
   min_factor_coverage: 0.5       # a factor needs >=50% of names to count, else neutralized
   # Require multi-pillar confirmation to make the buy list (kills single-signal noise).
-  min_pillars_passing: 2         # >=2 of 5 pillars confirm — matches live coverage (momentum+quant
-                                 # reliably have data; deep pillars are sparse). 3 starved the book to 1 name.
+  min_pillars_passing: 2         # >=2 of 5 pillars confirm — matches live coverage (momentum + quant)
+                                 # reliably have data; deep pillars are sparse. 3 starved the book to 1 name.
   pillar_pass_threshold: 55.0
 
 # ----------------------------------------------------------------------
