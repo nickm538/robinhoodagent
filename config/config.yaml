@@ -176,7 +176,7 @@ portfolio:
   cash_floor: 0.02
   rebalance:
     schedule: "intraday"         # re-rank ~2x/session — reactive to catalysts, not frozen weekly
-    intraday_hours: 1            # hourly re-rank to capture intraday moves (no_trade_band + turnover cap still damp churn)
+    intraday_hours: 0.5          # re-rank every 30 min — ~floor given the ~10-min full scan
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
   risk_controls:
@@ -213,7 +213,7 @@ data:
 # DAEMON  — the always-on autonomous loop.
 # ----------------------------------------------------------------------
 daemon:
-  poll_seconds: 900            # think/act every 15 min
+  poll_seconds: 300            # risk/stop checks every 5 min (faster reaction; rebalance still gated by its own cadence)
   trade_only_when_open: true   # only trade during US market hours
   manage_stops_every_tick: true
 
