@@ -187,6 +187,8 @@ class MboumProvider(DataProvider):
             holders = _first(summ, "institutionsCount", "totalInstitutions", "totalHolders") or (inc + dec + new)
             net = ((inc - dec) / (inc + dec)) if isinstance(inc, (int, float)) \
                 and isinstance(dec, (int, float)) and (inc + dec) > 0 else None
+            if net is None:           # no usable signal -> fall through to the next provider
+                raise ProviderUnsupported
             return {"holders": holders, "net_change_pct": net, "source": self.name}
         # Fallback: a flat list of holders with per-row change.
         recs = d if isinstance(d, list) else (d.get("ownershipList") if isinstance(d, dict) else None)
