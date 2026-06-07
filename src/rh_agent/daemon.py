@@ -218,8 +218,7 @@ class AlwaysOnAgent:
         hard_pct = float(rc.get("hard_stop_pct", 0.18))
         for pos in account.positions:
             tk = pos.ticker
-            if tk in self.state.pending_risk:
-                continue
+            # Pending risk orders are excluded from rebalance, but we still evaluate stops/TPs each tick.
             try:
                 px = self.agent.price_fn(tk, for_risk=True)
             except Exception as e:
