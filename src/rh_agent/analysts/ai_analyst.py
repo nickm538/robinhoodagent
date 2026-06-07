@@ -11,7 +11,7 @@ Design choices (per the claude-api skill):
     thinking, effort configurable.
   * Static system prompt is prompt-cached; only the volatile per-cycle data
     goes in the user turn (after the cached prefix).
-  * Model selectable: claude-sonnet-4-6 (default) or claude-opus-4-8.
+  * Model selectable via config / RH_AI_MODEL (default: claude-opus-4-8).
   * GRACEFUL NO-OP: if ANTHROPIC_API_KEY or the SDK is missing, or the call
     errors, it returns nothing and the agent runs pure-quant exactly as before.
 """

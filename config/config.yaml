@@ -213,7 +213,7 @@ portfolio:
 # ----------------------------------------------------------------------
 ai_analyst:
   enabled: true
-  model: "claude-sonnet-4-6"   # or "claude-opus-4-8" for max reasoning (pricier)
+  model: "claude-opus-4-8"      # max reasoning for catalyst/macro overlay (RH_AI_MODEL to override)
   effort: "medium"             # low | medium | high  (depth vs cost per cycle)
   weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
   max_candidates: 20           # send the top N quant names to Claude (wider hunt -> review more)
