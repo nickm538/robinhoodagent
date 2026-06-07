@@ -13,6 +13,7 @@ import json
 from ..logging_setup import get_logger
 from ..models import Account, Order
 from .base import Broker
+from .mcp_client import validate_mcp_url
 from .oauth import FileTokenStorage, _require_sdk, make_provider
 from .robinhood_mcp import (
     account_is_agentic,
@@ -63,7 +64,7 @@ class RobinhoodSDKBroker(Broker):
         _require_sdk()
         if not FileTokenStorage().has_tokens():
             raise RuntimeError("No Robinhood OAuth tokens found. Run `rh-agent auth` first.")
-        self.url = url
+        self.url = validate_mcp_url(url)
         self.account_number = account_number
         self._map: dict | None = None
         log.info("Robinhood SDK broker ready (auto-refreshing OAuth)")
