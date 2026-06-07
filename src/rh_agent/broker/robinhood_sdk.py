@@ -13,6 +13,7 @@ import json
 from ..logging_setup import get_logger
 from ..models import Account, Order
 from .base import Broker
+from .mcp_client import validate_mcp_url
 from .oauth import FileTokenStorage, _require_sdk, make_provider
 from .robinhood_mcp import (
     account_is_agentic,
@@ -60,10 +61,12 @@ class RobinhoodSDKBroker(Broker):
     supports_live = True
 
     def __init__(self, url: str, account_number: str | None = None):
+        # Validate the endpoint before anything else (independent of the SDK),
+        # so a misconfigured URL fails fast and consistently with the other paths.
+        self.url = validate_mcp_url(url)
         _require_sdk()
         if not FileTokenStorage().has_tokens():
             raise RuntimeError("No Robinhood OAuth tokens found. Run `rh-agent auth` first.")
-        self.url = url
         self.account_number = account_number
         self._map: dict | None = None
         log.info("Robinhood SDK broker ready (auto-refreshing OAuth)")
@@ -188,6 +191,7 @@ def probe(url: str, sample_ticker: str = "AAPL") -> dict:
     """Read-only introspection of the Robinhood MCP: every tool's input schema
     plus the *shape* of account/portfolio/positions/orders/quote responses.
     Places NO orders. Run this and share the output to finalise live wiring."""
+    url = validate_mcp_url(url)
     return asyncio.run(_probe(url, sample_ticker))
 
 

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ..config import REPO_ROOT
 from ..logging_setup import get_logger
+from .mcp_client import validate_mcp_url
 
 log = get_logger("oauth")
 TOKEN_FILE = REPO_ROOT / "state" / "robinhood_oauth.json"
@@ -104,7 +105,14 @@ async def _wait_for_callback(port: int):
 
 
 def make_provider(server_url: str, port: int = 8765, interactive: bool = True):
-    """Build an mcp OAuthClientProvider backed by our file storage."""
+    """Build an mcp OAuthClientProvider backed by our file storage.
+
+    This is the single chokepoint for every OAuth-bearing live path (the
+    ``auth`` and ``probe`` CLI commands and the SDK broker's sessions), so the
+    endpoint is validated here before any token is presented to it — keeping
+    the guard consistent with the lightweight ``MCPHttpClient``.
+    """
+    server_url = validate_mcp_url(server_url)
     _require_sdk()
     from mcp.client.auth import OAuthClientProvider
     from mcp.shared.auth import OAuthClientMetadata
@@ -157,4 +165,5 @@ async def _authenticate(server_url: str, port: int = 8765) -> list[str]:
 
 def authenticate(server_url: str, port: int = 8765) -> list[str]:
     """Blocking entry point used by `rh-agent auth`. Returns discovered tool names."""
+    server_url = validate_mcp_url(server_url)
     return asyncio.run(_authenticate(server_url, port))

@@ -160,12 +160,17 @@ class PortfolioBuilder:
         """Scale any sector whose total exceeds the cap back down to the cap.
         Freed weight becomes cash (we do not pile it into other names)."""
         w = dict(weights)
+        # Single pass: group tickers by sector while accumulating sector totals,
+        # so over-cap sectors are scaled without re-scanning the whole weight map.
+        sec_members: dict[str, list[str]] = {}
         sec_tot: dict[str, float] = {}
         for t, v in w.items():
-            sec_tot[td_map[t].sector] = sec_tot.get(td_map[t].sector, 0.0) + v
+            sec = td_map[t].sector
+            sec_members.setdefault(sec, []).append(t)
+            sec_tot[sec] = sec_tot.get(sec, 0.0) + v
         for s, tot in sec_tot.items():
             if tot > max_sec + 1e-9:
                 scale = max_sec / tot
-                for t in [t for t in w if td_map[t].sector == s]:
+                for t in sec_members[s]:
                     w[t] *= scale
         return w

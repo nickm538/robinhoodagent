@@ -7,8 +7,10 @@ Robinhood Trading MCP). No third-party MCP SDK is required.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -17,14 +19,50 @@ from ..logging_setup import get_logger
 log = get_logger("mcp")
 PROTOCOL_VERSION = "2025-06-18"
 
+# Loopback hosts where plain http is tolerated (local dev / mock MCP servers).
+# Only true loopback names — 0.0.0.0 is a bind-all address, not loopback.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
 
 class MCPError(Exception):
     pass
 
 
+def validate_mcp_url(url: str) -> str:
+    """Validate the MCP endpoint before any OAuth bearer token is attached.
+
+    The endpoint comes from operator config (``ROBINHOOD_MCP_URL``), but a typo
+    or copy-paste mistake could point it at a plaintext or non-HTTP destination
+    and leak the bearer token. Require https for remote hosts (http only for
+    loopback), and reject anything that is not http(s) with a host.
+    """
+    if not url or not isinstance(url, str):
+        raise MCPError("MCP URL is empty — set ROBINHOOD_MCP_URL.")
+    parsed = urlparse(url.strip())
+    host = parsed.hostname or ""
+    if parsed.scheme not in ("http", "https") or not host:
+        raise MCPError(f"MCP URL must be an http(s) URL with a host, got {url!r}.")
+    try:
+        parsed.port  # raises ValueError on a non-numeric/out-of-range port
+    except ValueError as e:
+        raise MCPError(f"MCP URL has an invalid port: {url!r}.") from e
+    is_loopback = host in _LOCAL_HOSTS
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            is_loopback = False
+    if parsed.scheme == "http" and not is_loopback:
+        raise MCPError(
+            "MCP URL must use https for remote hosts (the OAuth bearer token "
+            f"would otherwise transit in cleartext): {url!r}."
+        )
+    return url.strip()
+
+
 class MCPHttpClient:
     def __init__(self, url: str, token: str | None = None, timeout: int = 30):
-        self.url = url
+        self.url = validate_mcp_url(url)
         self.timeout = timeout
         self.session = requests.Session()
         self.session_id: str | None = None
