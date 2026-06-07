@@ -115,9 +115,24 @@ class Account:
     positions: list = field(default_factory=list)        # list[Position]
     account_number: str = ""
     source: str = ""
+    portfolio_confirmed: bool = True   # False when portfolio/equity fetch failed
+    positions_confirmed: bool = True     # False when positions fetch failed
+    buying_power_confirmed: bool = True  # False when BP could not be parsed
 
     def position_map(self) -> dict:
         return {p.ticker: p for p in self.positions}
+
+    @property
+    def reliable(self) -> bool:
+        """Live cycles must not reconcile unless every account field is confirmed."""
+        if self.source != "robinhood":
+            return True
+        return (
+            self.portfolio_confirmed
+            and self.positions_confirmed
+            and self.buying_power_confirmed
+            and bool(self.equity and self.equity > 0)
+        )
 
 
 @dataclass

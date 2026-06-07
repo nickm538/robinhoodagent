@@ -15,6 +15,12 @@ meta:
   base_currency: "USD"
 
 # ----------------------------------------------------------------------
+# EXECUTION  — real-money Agentic account (override via .env if needed)
+# ----------------------------------------------------------------------
+execution:
+  mode: "live"                   # live | paper — this deployment trades real money
+
+# ----------------------------------------------------------------------
 # DATA PROVIDERS  — priority/fallback order. The MarketData facade tries
 # them in order and uses the first that answers. MBOUM + FinancialDatasets
 # are prioritized per mandate.
@@ -188,16 +194,19 @@ portfolio:
       - [10000, 10, 0.14, 0.40]
       - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "intraday"         # re-rank intraday; buying-power cap keeps a small account safe from over-ordering
-    intraday_hours: 2            # every ~2h -> ~3-4 rebalances per session (at least 3x daily)
+    schedule: "weekly"           # weekly re-rank fits 1-3mo horizon; intraday poll handles stops
+    intraday_hours: 2            # used only when schedule: intraday
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
-    max_turnover_per_rebalance: 0.30  # cap churn per intraday rebalance (cadence x turnover)
+    max_turnover_per_rebalance: 0.30  # cap churn per rebalance
   risk_controls:
-    stop_loss_atr_mult: 2.5      # trailing stop at 2.5x ATR(14)
+    stop_loss_atr_mult: 2.5      # initial + trailing stop at N× ATR(14) from high-water mark
     take_profit_atr_mult: 6.0
-    hard_stop_pct: 0.18          # absolute -18% disaster stop
-    max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day
-    per_trade_risk_pct: 0.01     # risk ~1% of equity per position at stop
+    hard_stop_pct: 0.18          # absolute -18% disaster stop floor
+    max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day (sells still run)
+    per_trade_risk_pct: 0.01     # cap position weight so loss at stop ~1% of equity
+    block_ai_caution: true       # exclude names flagged bearish by Claude overlay
+    block_earnings_within_days: 2  # skip new entries within N days of earnings
+    block_high_volatility: false
 
 # ----------------------------------------------------------------------
 # BACKTEST  — walk-forward, real prices, vs benchmark.
@@ -210,8 +219,8 @@ portfolio:
 # ----------------------------------------------------------------------
 ai_analyst:
   enabled: true
-  model: "claude-sonnet-4-6"   # or "claude-opus-4-8" for max reasoning (pricier)
-  effort: "low"                # low | medium | high  (depth vs cost per cycle)
+  model: "claude-opus-4-8"      # max reasoning for catalyst/macro overlay (RH_AI_MODEL to override)
+  effort: "medium"             # low | medium | high  (depth vs cost per cycle)
   weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
   max_candidates: 20           # send the top N quant names to Claude (wider hunt -> review more)
   max_tokens: 6000

@@ -33,3 +33,23 @@ def daily_drawdown_halt(equity: float, day_start_equity: float, limit: float) ->
     if day_start_equity <= 0:
         return False
     return (equity / day_start_equity - 1.0) <= -abs(limit)
+
+
+def trailing_stop(high_water: float, atr: float | None, mult: float, hard_pct: float) -> float:
+    """Ratchet a trailing stop upward from the high-water mark using ATR distance."""
+    hard = high_water * (1 - hard_pct)
+    if atr and atr > 0:
+        return round(max(high_water - mult * atr, hard), 2)
+    return round(hard, 2)
+
+
+def risk_capped_weight(price: float, stop_price: float | None, equity_weight: float,
+                       per_trade_risk_pct: float) -> float:
+    """Cap target weight so loss at stop is <= per_trade_risk_pct of equity."""
+    if not stop_price or not price or price <= stop_price or per_trade_risk_pct <= 0:
+        return equity_weight
+    stop_dist = (price - stop_price) / price
+    if stop_dist <= 0:
+        return equity_weight
+    max_w = per_trade_risk_pct / stop_dist
+    return min(equity_weight, max_w)

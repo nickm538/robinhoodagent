@@ -6,7 +6,7 @@ import pandas as pd
 
 from rh_agent.broker.paper import PaperBroker
 from rh_agent.config import load_config
-from rh_agent.models import Order, TargetPosition, TickerData, Verdict
+from rh_agent.models import Account, Order, Position, TargetPosition, TickerData, Verdict
 from rh_agent.portfolio import PortfolioBuilder
 from rh_agent.regime import RegimeResult
 
@@ -135,7 +135,8 @@ def test_robinhood_parse_account_portfolio_shape():
     prof = {"data": {"total_value": "412.50", "equity_value": "0.00", "cash": "412.50",
                      "buying_power": {"buying_power": "400.00",
                                       "unleveraged_buying_power": "400.00"}}, "guide": "..."}
-    acct = parse_account(prof, {"data": {"positions": []}}, "AGENT123")
+    acct = parse_account(prof, {"data": {"positions": []}}, "AGENT123",
+                         portfolio_ok=True, positions_ok=True)
     assert acct.equity == 412.50          # total_value, NOT equity_value (0)
     assert acct.cash == 412.50
     assert acct.buying_power == 400.00
@@ -143,8 +144,10 @@ def test_robinhood_parse_account_portfolio_shape():
     # a genuinely empty account: total_value "0.00" must stay 0.0, not be masked
     flat = parse_account({"data": {"total_value": "0.00", "cash": "0.00",
                                    "buying_power": {"buying_power": "0.00"}}},
-                         {"data": {"positions": []}}, "AGENT123")
+                         {"data": {"positions": []}}, "AGENT123",
+                         portfolio_ok=True, positions_ok=True)
     assert flat.equity == 0.0 and flat.buying_power == 0.0
+    assert flat.reliable is False
 
 
 def test_build_orders_respects_buying_power():
@@ -193,6 +196,85 @@ def test_autoscale_tiers_by_equity():
     assert PortfolioBuilder(cfg)._autoscale_params(513) is None
 
 
+def test_per_trade_risk_cap_limits_position_weight():
+    cfg = load_config()
+    cfg.raw["portfolio"]["autoscale"] = {"enabled": False}
+    cfg.raw["portfolio"]["target_positions"] = 1
+    cfg.raw["portfolio"]["max_position_weight"] = 0.50
+    cfg.raw["portfolio"]["risk_controls"]["per_trade_risk_pct"] = 0.01
+    b = PortfolioBuilder(cfg)
+    td = _td("AAA", "Information Technology")
+    td.technicals["atr"] = 20.0
+    regime = RegimeResult("risk_on_trend", {}, 1.0)
+    targets = b.build([Verdict("AAA", 90, {}, 5)], {"AAA": td}, regime, 100_000)
+    assert len(targets) == 1
+    assert targets[0].weight <= 0.056
+
+
+def test_account_is_agentic():
+    from rh_agent.broker.robinhood_mcp import account_is_agentic
+    accts = {"data": {"accounts": [
+        {"account_number": "NONAGENTIC", "agentic_allowed": False},
+        {"account_number": "AGENT123", "agentic_allowed": True, "deactivated": False}]}}
+    assert account_is_agentic(accts, "AGENT123") is True
+    assert account_is_agentic(accts, "NONAGENTIC") is False
+
+
+class _DummyAgent:
+    def __init__(self, prices):
+        self._prices = prices
+
+    def price_fn(self, ticker, for_risk=False):
+        return self._prices.get(ticker)
+
+
+class _FakeBroker:
+    def __init__(self, status):
+        self.status = status
+
+    def place_order(self, order, dry_run=True):
+        return {"status": self.status}
+
+
+def _daemon_for_risk_test(price: float):
+    import rh_agent.daemon as daemon
+    cfg = load_config()
+    d = daemon.AlwaysOnAgent.__new__(daemon.AlwaysOnAgent)
+    d.cfg = cfg
+    d.agent = _DummyAgent({"AAA": price})
+    d.state = daemon.DaemonState(stops={"AAA": 95.0}, take_profits={},
+                                 high_water={"AAA": price}, pending_risk={})
+    return d
+
+
+def test_daemon_manage_risk_keeps_stop_in_dry_run():
+    d = _daemon_for_risk_test(price=90.0)
+    acct = Account(equity=1_000.0, cash=0.0, buying_power=0.0,
+                   positions=[Position("AAA", 1.0, 100.0, current_price=90.0)])
+    hits = d._manage_risk(_FakeBroker("preview"), acct, execute=False)
+    assert hits == set()
+    assert d.state.stops["AAA"] == 95.0
+    assert d.state.pending_risk == {}
+
+
+def test_daemon_manage_risk_keeps_stop_on_order_error():
+    d = _daemon_for_risk_test(price=90.0)
+    acct = Account(equity=1_000.0, cash=0.0, buying_power=0.0,
+                   positions=[Position("AAA", 1.0, 100.0, current_price=90.0)])
+    hits = d._manage_risk(_FakeBroker("error"), acct, execute=True)
+    assert hits == set()
+    assert d.state.stops["AAA"] == 95.0
+
+
+def test_daemon_manage_risk_clears_stop_on_confirmed_order():
+    d = _daemon_for_risk_test(price=90.0)
+    acct = Account(equity=1_000.0, cash=0.0, buying_power=0.0,
+                   positions=[Position("AAA", 1.0, 100.0, current_price=90.0)])
+    hits = d._manage_risk(_FakeBroker("submitted"), acct, execute=True)
+    assert hits == {"AAA"}
+    assert "AAA" not in d.state.stops
+
+
 def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
     # a corrupt/garbage state file must never crash the 24/7 loop at boot
     import rh_agent.daemon as daemon
@@ -202,8 +284,12 @@ def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
     p.write_text('{"last_rebalance":"x","stops":"GARBAGE","take_profits":42,"bogus":1}')
     st = daemon.DaemonState.load()
     assert st.stops == {} and st.take_profits == {}      # coerced to dicts
-    assert st.last_rebalance == "x"                       # known field preserved
+    assert st.last_rebalance == ""                        # invalid iso reset
     # totally invalid json -> fresh state, no crash
     p.write_text("{not valid json")
     st2 = daemon.DaemonState.load()
     assert st2.stops == {} and st2.take_profits == {}
+    # invalid last_rebalance is reset (not preserved as "x")
+    p.write_text('{"last_rebalance":"x","stops":{},"take_profits":{}}')
+    st3 = daemon.DaemonState.load()
+    assert st3.last_rebalance == ""

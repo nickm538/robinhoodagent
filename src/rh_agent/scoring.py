@@ -71,7 +71,7 @@ class Scorer:
             v.flags.append("smallcap")
 
     def eligible(self, verdicts: list[Verdict]) -> list[Verdict]:
-        """Apply conviction floor + multi-pillar confirmation.
+        """Apply conviction floor + multi-pillar confirmation + risk flags.
 
         The two gates can be overridden via env (RH_MIN_CONVICTION,
         RH_MIN_PILLARS) — useful when fewer data pillars are wired in a given
@@ -82,8 +82,33 @@ class Scorer:
                                    self.cfg.get("portfolio.min_conviction_score", 60.0)))
         min_pillars = int(float(os.getenv("RH_MIN_PILLARS",
                                           self.norm.get("min_pillars_passing", 3))))
-        out = [v for v in verdicts
-               if v.composite >= min_conf and v.pillars_passing >= min_pillars]
-        log.info("eligible: %d/%d names clear conviction>=%.0f & pillars>=%d",
+        rc = self.cfg.get("portfolio.risk_controls", {}) or {}
+        block_ai = bool(rc.get("block_ai_caution", True))
+        raw_earnings_days = rc.get("block_earnings_within_days", 2)
+        block_earnings_days = int(raw_earnings_days) if raw_earnings_days is not None else 0
+        block_high_vol = bool(rc.get("block_high_volatility", False))
+        out = []
+        for v in verdicts:
+            if v.composite < min_conf or v.pillars_passing < min_pillars:
+                continue
+            if block_ai and "ai_caution" in v.flags:
+                continue
+            if block_high_vol and "high_volatility" in v.flags:
+                continue
+            if block_earnings_days > 0:
+                blocked = False
+                for fl in v.flags:
+                    if fl.startswith("earnings_in_"):
+                        try:
+                            days = int(fl.split("_")[-1].rstrip("d"))
+                            if days <= block_earnings_days:
+                                blocked = True
+                                break
+                        except ValueError:
+                            pass
+                if blocked:
+                    continue
+            out.append(v)
+        log.info("eligible: %d/%d names clear conviction>=%.0f & pillars>=%d (flags applied)",
                  len(out), len(verdicts), min_conf, min_pillars)
         return out

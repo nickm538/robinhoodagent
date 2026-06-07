@@ -14,7 +14,13 @@ from ..logging_setup import get_logger
 from ..models import Account, Order
 from .base import Broker
 from .oauth import FileTokenStorage, _require_sdk, make_provider
-from .robinhood_mcp import discover_tool_map, order_args, parse_account, pick_account_number
+from .robinhood_mcp import (
+    account_is_agentic,
+    discover_tool_map,
+    order_args,
+    parse_account,
+    pick_account_number,
+)
 
 log = get_logger("broker.rh_sdk")
 
@@ -92,42 +98,54 @@ class RobinhoodSDKBroker(Broker):
             raise RuntimeError(f"no Robinhood MCP tool for capability '{cap}'")
         return _extract(await session.call_tool(tool, args or {}))
 
-    async def _resolve_account(self, session) -> str | None:
+    async def _resolve_account(self, session, *, require_agentic: bool = False) -> str | None:
         """Robinhood requires account_number on calls; fetch it once from
         get_accounts (preferring the Agentic account)."""
-        if self.account_number:
-            return self.account_number
-        try:
-            accts = await self._call(session, "accounts", {})
-            self.account_number = pick_account_number(accts)
-            if self.account_number:
-                log.info("using Robinhood account %s", self.account_number)
-            else:
-                log.warning("could not determine account_number from get_accounts")
-        except Exception as e:
-            log.warning("account resolve failed: %s", e)
+        if (self._map or {}).get("accounts"):
+            try:
+                accts = await self._call(session, "accounts", {})
+                if self.account_number:
+                    if account_is_agentic(accts, self.account_number):
+                        return self.account_number
+                    raise RuntimeError("configured account_number is not agentic_allowed")
+                self.account_number = pick_account_number(accts)
+                if self.account_number:
+                    log.info("using Robinhood account %s", self.account_number)
+                elif require_agentic:
+                    log.warning("could not determine an agentic_allowed account from get_accounts")
+            except RuntimeError:
+                raise
+            except Exception as e:
+                log.warning("account resolve failed: %s", e)
+                if require_agentic:
+                    raise
+        if require_agentic and not self.account_number:
+            raise RuntimeError("no agentic_allowed account available for live order placement")
         return self.account_number
 
     # -- Broker API --
     def get_account(self) -> Account:
         async def fn(session):
-            acct = await self._resolve_account(session)
+            acct = await self._resolve_account(session, require_agentic=False)
             a = {"account_number": acct} if acct else {}
             prof = pos = None
+            prof_ok = pos_ok = False
             try:
                 prof = await self._call(session, "buying_power", a)   # -> get_portfolio
+                prof_ok = prof is not None
             except Exception as e:
                 log.warning("portfolio read failed: %s", e)
             try:
                 pos = await self._call(session, "positions", a)       # -> get_equity_positions
+                pos_ok = True
             except Exception as e:
                 log.warning("positions read failed: %s", e)
-            return parse_account(prof, pos, acct)
+            return parse_account(prof, pos, acct, portfolio_ok=prof_ok, positions_ok=pos_ok)
         return self._run(fn)
 
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
         async def fn(session):
-            acct = await self._resolve_account(session)
+            acct = await self._resolve_account(session, require_agentic=not dry_run)
             args = order_args(order, dry_run, acct)
             if dry_run:
                 # validate via the broker's review tool if present (no live order)

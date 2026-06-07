@@ -4,7 +4,8 @@
 
 ### Product overview
 
-**rh-agent** is a single-process Python CLI/daemon for quantamental equity trading (paper mode by default). There is no web UI, database, or docker-compose stack. The only local runtime is the `rh-agent` Python package.
+**rh-agent** is a single-process Python CLI/daemon for quantamental equity trading
+(live Agentic account by default). There is no web UI, database, or docker-compose stack. The only local runtime is the `rh-agent` Python package.
 
 ### One-time VM prerequisites
 
@@ -40,7 +41,8 @@ Or invoke tools directly via `.venv/bin/python` / `.venv/bin/rh-agent`.
 
 - Copy `.env.example` → `.env` and fill API keys for live data providers.
 - Strategy tuning lives in `config/config.yaml`.
-- Default `EXECUTION_MODE=paper` — safe simulated fills, no brokerage contact.
+- Default `EXECUTION_MODE=live` with `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` in `.env.example`.
+- Set `EXECUTION_MODE=paper` and clear `LIVE_TRADING_CONFIRM` for safe simulated fills.
 
 ### Running without API keys (offline / cloud demo)
 
@@ -54,7 +56,7 @@ Then run scan/run/backtest with `--snapshot /path/to/snapshot.json`.
 ### Live data / trading (optional)
 
 - **Live scans** need at least one market-data API key (`FINANCIALDATASETS_API_KEY`, `MBOUM_API_KEY`, etc.) in `.env`.
-- **Live trading** requires `pip install -e ".[live]"`, `python -m rh_agent.cli auth` (OAuth on port 8765), and explicit `EXECUTION_MODE=live` + `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY`.
+- **Live trading** requires `pip install -e ".[live]"`, `python -m rh_agent.cli auth` (OAuth on port 8765), and `.env` with `EXECUTION_MODE=live` + `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` (defaults in `.env.example`).
 
 ### Gotchas
 

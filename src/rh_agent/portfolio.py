@@ -8,7 +8,7 @@ from .config import Config
 from .logging_setup import get_logger
 from .models import TargetPosition, TickerData, Verdict
 from .regime import RegimeResult
-from .risk import annualized_vol, atr_stop, take_profit
+from .risk import annualized_vol, atr_stop, risk_capped_weight, take_profit
 
 log = get_logger("portfolio")
 
@@ -69,11 +69,26 @@ class PortfolioBuilder:
         #         cash (we never re-inflate past a cap). ----
         weights = self._cap(weights, max_w)
         weights = self._sector_cap(weights, td_map, max_sec)
+        # ---- 4b) cap each name by stop-distance risk budget ----
+        rc = self.p.get("risk_controls", {})
+        risk_pct = float(rc.get("per_trade_risk_pct", 0.0) or 0.0)
+        if risk_pct > 0:
+            atr_mult = float(rc.get("stop_loss_atr_mult", 2.5))
+            hard_pct = float(rc.get("hard_stop_pct", 0.18))
+            capped = {}
+            for t, w in weights.items():
+                td = td_map[t]
+                px = td.price
+                if not px:
+                    capped[t] = w
+                    continue
+                stop = atr_stop(px, td.technicals.get("atr"), atr_mult, hard_pct)
+                capped[t] = risk_capped_weight(px, stop, w, risk_pct)
+            weights = capped
         # ---- 5) drop dust positions (their weight becomes cash) ----
         weights = {t: w for t, w in weights.items() if w >= min_w * 0.5}
 
         # ---- 6) materialise target positions w/ stops ----
-        rc = self.p.get("risk_controls", {})
         out: list[TargetPosition] = []
         for v in selected:
             t = v.ticker

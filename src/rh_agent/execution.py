@@ -13,21 +13,26 @@ log = get_logger("execution")
 
 
 def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
-                 price_fn: Callable[[str], float | None]) -> list[Order]:
+                 price_fn: Callable[[str], float | None], *,
+                 allow_buys: bool = True,
+                 exclude_tickers: set[str] | None = None) -> list[Order]:
     equity = account.equity or 0.0
     if equity <= 0:
         return []
     reb = cfg.get("portfolio.rebalance", {})
     band = float(reb.get("no_trade_band", 0.015))
-    max_turn = float(reb.get("max_turnover_per_rebalance", 0.40))
+    max_turn = float(reb.get("max_turnover_per_rebalance", 0.30))
     min_notional = 20.0
 
+    exclude = exclude_tickers or set()
     cur = account.position_map()
     tmap = {t.ticker: t for t in targets}
     orders: list[Order] = []
 
     # --- exits & trims (sells) ---
     for tk, pos in cur.items():
+        if tk in exclude:
+            continue
         px = price_fn(tk) or pos.current_price or pos.avg_price
         cur_w = (pos.quantity * px) / equity if px else 0.0
         tgt_w = tmap[tk].weight if tk in tmap else 0.0
@@ -42,6 +47,10 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     # --- entries & adds (buys) ---
     buys: list[Order] = []
     for tk, t in tmap.items():
+        if tk in exclude:
+            continue
+        if not allow_buys:
+            continue
         px = price_fn(tk)
         if not px:
             continue

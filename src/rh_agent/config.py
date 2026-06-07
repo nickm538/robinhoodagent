@@ -86,7 +86,7 @@ class Config:
 
     @property
     def execution_mode(self) -> str:
-        return os.getenv("EXECUTION_MODE", self.get("execution.mode", "paper")).lower()
+        return os.getenv("EXECUTION_MODE", self.get("execution.mode", "live")).lower()
 
     @property
     def live_trading_armed(self) -> bool:
