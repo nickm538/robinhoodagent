@@ -242,6 +242,8 @@ class AlwaysOnAgent:
                     self.state.high_water.pop(tk, None)
                     self.state.pending_risk.pop(tk, None)
                     triggered.add(tk)
+                elif not execute:
+                    log.info("STOP preview for %s — keeping stop state unchanged", tk)
                 else:
                     self.state.pending_risk[tk] = "stop"
                     log.error("STOP sell failed for %s — keeping stop active", tk)
@@ -255,6 +257,8 @@ class AlwaysOnAgent:
                     self.state.take_profits.pop(tk, None)
                     self.state.pending_risk.pop(tk, None)
                     triggered.add(tk)
+                elif not execute:
+                    log.info("TP preview for %s — keeping TP state unchanged", tk)
                 else:
                     self.state.pending_risk[tk] = "take_profit"
                     log.error("TP sell failed for %s — keeping TP active", tk)

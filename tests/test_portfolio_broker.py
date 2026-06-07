@@ -254,6 +254,7 @@ def test_daemon_manage_risk_keeps_stop_in_dry_run():
     hits = d._manage_risk(_FakeBroker("preview"), acct, execute=False)
     assert hits == set()
     assert d.state.stops["AAA"] == 95.0
+    assert d.state.pending_risk == {}
 
 
 def test_daemon_manage_risk_keeps_stop_on_order_error():
