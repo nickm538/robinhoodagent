@@ -164,11 +164,16 @@ class AlwaysOnAgent:
         pending = set(self.state.pending_risk.keys())
 
         # 1) risk management on open positions — every tick
-        self._manage_risk(broker, account, execute)
+        risk_actions = self._manage_risk(broker, account, execute)
         pending |= set(self.state.pending_risk.keys())
 
         # 2) scheduled rebalance (buys blocked while halted; sells always allowed)
         if self._due_for_rebalance(now):
+            if risk_actions:
+                log.warning("skipping rebalance this tick after protective action(s): %s",
+                            sorted(risk_actions))
+                self.state.save()
+                return
             log.info("rebalance due — scanning (allow_buys=%s)", not halted)
             run = self.agent.run(
                 execute=execute,
@@ -184,7 +189,16 @@ class AlwaysOnAgent:
                     px = self.agent.price_fn(tp.ticker) or 0.0
                     if px:
                         self.state.high_water[tp.ticker] = px
-            held = {p.ticker for p in broker.get_account().positions}
+            held_account = run.post_account
+            if held_account is None:
+                try:
+                    held_account = self.agent.make_broker().get_account()
+                except Exception as e:
+                    log.warning("post-rebalance account refresh failed: %s", e)
+            if held_account is not None:
+                held = {p.ticker for p in held_account.positions}
+            else:
+                held = {p.ticker for p in account.positions}
             self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
             self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
             self.state.high_water = {k: v for k, v in self.state.high_water.items() if k in held}
@@ -196,7 +210,9 @@ class AlwaysOnAgent:
 
         self.state.save()
 
-    def _manage_risk(self, broker, account, execute: bool) -> None:
+    def _manage_risk(self, broker, account, execute: bool) -> set[str]:
+        """Manage stops/TPs. Returns tickers where a protective sell was confirmed."""
+        triggered: set[str] = set()
         rc = self.cfg.get("portfolio.risk_controls", {})
         atr_mult = float(rc.get("stop_loss_atr_mult", 2.5))
         hard_pct = float(rc.get("hard_stop_pct", 0.18))
@@ -221,11 +237,12 @@ class AlwaysOnAgent:
                     Order(tk, "sell", pos.quantity, reason=f"stop {stop}"),
                     dry_run=not execute,
                 )
-                if order_succeeded(res, executing=execute):
+                if execute and order_succeeded(res, executing=True):
                     self.state.stops.pop(tk, None)
                     self.state.take_profits.pop(tk, None)
                     self.state.high_water.pop(tk, None)
                     self.state.pending_risk.pop(tk, None)
+                    triggered.add(tk)
                 else:
                     self.state.pending_risk[tk] = "stop"
                     log.error("STOP sell failed for %s — keeping stop active", tk)
@@ -235,9 +252,10 @@ class AlwaysOnAgent:
                     Order(tk, "sell", pos.quantity * 0.5, reason=f"take-profit {tp}"),
                     dry_run=not execute,
                 )
-                if order_succeeded(res, executing=execute):
+                if execute and order_succeeded(res, executing=True):
                     self.state.take_profits.pop(tk, None)
                     self.state.pending_risk.pop(tk, None)
+                    triggered.add(tk)
                 else:
                     self.state.pending_risk[tk] = "take_profit"
                     log.error("TP sell failed for %s — keeping TP active", tk)
@@ -251,6 +269,7 @@ class AlwaysOnAgent:
                 trail = trailing_stop(hw, atr, atr_mult, hard_pct)
                 if trail > stop:
                     self.state.stops[tk] = trail
+        return triggered
 
     # -- main loop --
     def run_forever(self, execute: bool = False, once: bool = False,

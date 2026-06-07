@@ -96,12 +96,29 @@ def pick_account_number(raw) -> str | None:
         if isinstance(d, dict) and (d.get("account_number") or d.get("account_id") or d.get("id")):
             rows = [d]
     agentic = [r for r in rows if r.get("agentic_allowed") is True and not r.get("deactivated")]
-    for r in (agentic or rows):
+    for r in agentic:
         num = (r.get("account_number") or r.get("rhs_account_number")
                or r.get("account_id") or r.get("id"))
         if num:
             return str(num)
     return None
+
+
+def account_is_agentic(raw, account_number: str | None) -> bool:
+    """True when account_number refers to an active Agentic-trading account."""
+    if not account_number:
+        return False
+    rows = [r for r in _unwrap_rows(raw, ["accounts", "results"]) if isinstance(r, dict)]
+    if not rows:
+        d = raw.get("data", raw) if isinstance(raw, dict) else raw
+        if isinstance(d, dict):
+            rows = [d]
+    for r in rows:
+        num = (r.get("account_number") or r.get("rhs_account_number")
+               or r.get("account_id") or r.get("id"))
+        if num and str(num) == str(account_number):
+            return r.get("agentic_allowed") is True and not r.get("deactivated")
+    return False
 
 
 def parse_account(prof, positions_raw, account_number: str | None, *,
@@ -222,23 +239,39 @@ class RobinhoodMCPBroker(Broker):
             raise MCPError(f"no Robinhood MCP tool for capability '{cap}'")
         return self.client.call_tool(tool, args or {})
 
-    def _resolve_account_number(self) -> str | None:
-        if self.account_number:
-            return self.account_number
+    def _resolve_account_number(self, *, require_agentic: bool = False) -> str | None:
         if not self.map.get("accounts"):
-            return None
+            if require_agentic and not self.account_number:
+                raise MCPError("no accounts tool available and no account_number configured")
+            return self.account_number
         try:
             accts = self._call("accounts", {})
-            self.account_number = pick_account_number(accts)
             if self.account_number:
+                if account_is_agentic(accts, self.account_number):
+                    return self.account_number
+                raise MCPError("configured account_number is not agentic_allowed")
+            picked = pick_account_number(accts)
+            if picked:
+                self.account_number = picked
                 log.info("using Robinhood account %s", self.account_number)
+                return picked
+            if require_agentic:
+                raise MCPError("no agentic_allowed account found")
+        except MCPError:
+            raise
         except Exception as e:
             log.warning("account resolve failed: %s", e)
+            if require_agentic:
+                raise MCPError(f"account resolve failed: {e}") from e
         return self.account_number
 
     # ------------------------------------------------------------------ account
     def get_account(self) -> Account:
-        acct_no = self._resolve_account_number()
+        acct_no = None
+        try:
+            acct_no = self._resolve_account_number(require_agentic=False)
+        except Exception as e:
+            log.warning("account resolve failed: %s", e)
         prof = positions_raw = None
         prof_ok = pos_ok = False
         args = {} if not acct_no else {"account_number": acct_no}
@@ -257,8 +290,13 @@ class RobinhoodMCPBroker(Broker):
 
     # ------------------------------------------------------------------ orders
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
-        acct = self._resolve_account_number()
-        args = order_args(order, dry_run, acct)
+        args = None
+        try:
+            acct = self._resolve_account_number(require_agentic=not dry_run)
+            args = order_args(order, dry_run, acct)
+        except Exception as e:
+            log.error("live order FAILED %s %s: %s", order.side, order.ticker, e)
+            return {"status": "error", "ticker": order.ticker, "error": str(e)}
         if dry_run:
             if self.map.get("review_order"):
                 try:
