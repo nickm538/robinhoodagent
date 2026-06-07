@@ -17,7 +17,7 @@ from typing import Any
 import pandas as pd
 
 from ..models import Quote
-from .base import (CACHE_DIR, DataProvider, DiskCache, HttpClient, OFFLINE,
+from .base import (DataProvider, DiskCache, HttpClient, OFFLINE,
                    ProviderError, ProviderUnsupported, prices_to_df)
 
 BASE = "https://www.alphavantage.co"

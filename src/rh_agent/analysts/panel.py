@@ -9,7 +9,7 @@ what turns five noisy opinions into one robust decision.
 from __future__ import annotations
 
 from ..config import Config
-from ..factors.normalize import NEUTRAL, weighted_blend
+from ..factors.normalize import weighted_blend
 from ..models import Verdict
 from ..regime import RegimeResult
 

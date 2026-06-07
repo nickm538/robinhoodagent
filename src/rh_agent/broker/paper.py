@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from ..config import REPO_ROOT
+from ..config import REPO_ROOT, write_private
 from ..logging_setup import get_logger
 from ..models import Account, Order, Position, utcnow
 from .base import Broker
@@ -41,8 +41,7 @@ class PaperBroker(Broker):
         return s
 
     def _save(self, s: dict | None = None) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(json.dumps(s or self.state, indent=2, default=str))
+        write_private(self.state_path, json.dumps(s or self.state, indent=2, default=str))
 
     def get_account(self) -> Account:
         positions = []

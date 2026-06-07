@@ -17,7 +17,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from ..config import REPO_ROOT
+from ..config import REPO_ROOT, write_private
 from ..logging_setup import get_logger
 from .mcp_client import validate_mcp_url
 
@@ -46,12 +46,8 @@ class FileTokenStorage:
         return json.loads(self.path.read_text()) if self.path.exists() else {}
 
     def _save(self, d: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(d, indent=2, default=str))
-        try:
-            self.path.chmod(0o600)
-        except Exception:
-            pass
+        # owner-only from creation (no world-readable window for the OAuth tokens)
+        write_private(self.path, json.dumps(d, indent=2, default=str))
 
     def has_tokens(self) -> bool:
         return bool(self._load().get("tokens"))
