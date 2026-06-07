@@ -189,6 +189,7 @@ def probe(url: str, sample_ticker: str = "AAPL") -> dict:
     """Read-only introspection of the Robinhood MCP: every tool's input schema
     plus the *shape* of account/portfolio/positions/orders/quote responses.
     Places NO orders. Run this and share the output to finalise live wiring."""
+    url = validate_mcp_url(url)
     return asyncio.run(_probe(url, sample_ticker))
 
 

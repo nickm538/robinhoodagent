@@ -54,6 +54,31 @@ def test_validate_mcp_url_rejects_bad_scheme_or_empty():
             validate_mcp_url(bad)
 
 
+def test_make_provider_validates_url_before_sdk():
+    # The OAuth chokepoint must reject a bad endpoint before anything else,
+    # so the bearer token is never presented to it (independent of the SDK).
+    from rh_agent.broker.oauth import make_provider
+    with pytest.raises(MCPError):
+        make_provider("http://evil.example.com/mcp")
+    # a valid https endpoint clears URL validation (it may still fail later when
+    # the optional mcp SDK is absent, but that must not be a URL MCPError)
+    try:
+        make_provider("https://agent.robinhood.com/mcp")
+    except MCPError:
+        pytest.fail("valid https URL was rejected by URL validation")
+    except Exception:
+        pass
+
+
+def test_authenticate_and_probe_reject_bad_urls():
+    from rh_agent.broker.oauth import authenticate
+    from rh_agent.broker.robinhood_sdk import probe
+    with pytest.raises(MCPError):
+        authenticate("http://evil.example.com/mcp")
+    with pytest.raises(MCPError):
+        probe("ftp://nope/mcp")
+
+
 # ----------------------------- scoring.Scorer -----------------------------
 
 def _priced_td(ticker: str, slope: float, *, market_cap: float = 5e10,
