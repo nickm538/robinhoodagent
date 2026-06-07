@@ -83,9 +83,10 @@ class Scorer:
         min_pillars = int(float(os.getenv("RH_MIN_PILLARS",
                                           self.norm.get("min_pillars_passing", 3))))
         rc = self.cfg.get("portfolio.risk_controls", {}) or {}
-        block_ai = rc.get("block_ai_caution", True)
-        block_earnings_days = int(rc.get("block_earnings_within_days", 2))
-        block_high_vol = rc.get("block_high_volatility", False)
+        block_ai = bool(rc.get("block_ai_caution", True))
+        raw_earnings_days = rc.get("block_earnings_within_days", 2)
+        block_earnings_days = int(raw_earnings_days) if raw_earnings_days is not None else 0
+        block_high_vol = bool(rc.get("block_high_volatility", False))
         out = []
         for v in verdicts:
             if v.composite < min_conf or v.pillars_passing < min_pillars:
