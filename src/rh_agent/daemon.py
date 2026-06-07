@@ -135,10 +135,15 @@ class AlwaysOnAgent:
                             100 * dd, 100 * dd_limit)
 
         # 1) risk management on open positions — every tick
-        self._manage_risk(broker, account, execute)
+        risk_actions = self._manage_risk(broker, account, execute)
 
         # 2) scheduled rebalance (skipped while halted)
         if self._due_for_rebalance(now) and not halted:
+            if risk_actions:
+                log.warning("skipping rebalance this tick after protective action(s): %s",
+                            sorted(risk_actions))
+                self.state.save()
+                return
             log.info("rebalance due — scanning")
             run = self.agent.run(execute=execute)
             for tp in run.scan.targets:
@@ -147,9 +152,17 @@ class AlwaysOnAgent:
                 if tp.take_profit:
                     self.state.take_profits[tp.ticker] = tp.take_profit
             # forget stops/take-profits for names no longer held
-            held = {p.ticker for p in broker.get_account().positions}
-            self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
-            self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
+            held_account = run.post_account
+            if held_account is None:
+                try:
+                    # Refresh from a new broker handle to avoid stale in-memory state.
+                    held_account = self.agent.make_broker().get_account()
+                except Exception as e:
+                    log.warning("post-rebalance account refresh failed: %s", e)
+            if held_account is not None:
+                held = {p.ticker for p in held_account.positions}
+                self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
+                self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
             self.state.last_rebalance = now.isoformat()
             log.info("rebalanced: %d targets, %d orders (%s)",
                      len(run.scan.targets), len(run.orders), run.mode)
@@ -158,7 +171,8 @@ class AlwaysOnAgent:
 
         self.state.save()
 
-    def _manage_risk(self, broker, account, execute: bool) -> None:
+    def _manage_risk(self, broker, account, execute: bool) -> set[str]:
+        triggered: set[str] = set()
         for pos in account.positions:
             px = self.agent.price_fn(pos.ticker)
             if not px:
@@ -167,14 +181,28 @@ class AlwaysOnAgent:
             tp = self.state.take_profits.get(pos.ticker)
             if stop and px <= stop:
                 log.warning("STOP hit %s @ %.2f (stop %.2f) — selling", pos.ticker, px, stop)
-                broker.place_order(Order(pos.ticker, "sell", pos.quantity,
-                                         reason=f"stop {stop}"), dry_run=not execute)
-                self.state.stops.pop(pos.ticker, None)
+                res = broker.place_order(Order(pos.ticker, "sell", pos.quantity,
+                                               reason=f"stop {stop}"), dry_run=not execute)
+                status = str((res or {}).get("status", "")).lower()
+                if execute and status in {"submitted", "filled"}:
+                    self.state.stops.pop(pos.ticker, None)
+                    triggered.add(pos.ticker)
+                else:
+                    lvl = log.warning if execute else log.info
+                    lvl("STOP order for %s not confirmed (status=%s) — keeping stop armed",
+                        pos.ticker, status or "unknown")
             elif tp and px >= tp:
                 log.info("TAKE-PROFIT %s @ %.2f (tp %.2f) — trimming half", pos.ticker, px, tp)
-                broker.place_order(Order(pos.ticker, "sell", pos.quantity * 0.5,
-                                         reason=f"take-profit {tp}"), dry_run=not execute)
-                self.state.take_profits.pop(pos.ticker, None)
+                res = broker.place_order(Order(pos.ticker, "sell", pos.quantity * 0.5,
+                                               reason=f"take-profit {tp}"), dry_run=not execute)
+                status = str((res or {}).get("status", "")).lower()
+                if execute and status in {"submitted", "filled"}:
+                    self.state.take_profits.pop(pos.ticker, None)
+                    triggered.add(pos.ticker)
+                else:
+                    lvl = log.warning if execute else log.info
+                    lvl("TAKE-PROFIT order for %s not confirmed (status=%s) — keeping target armed",
+                        pos.ticker, status or "unknown")
             else:
                 # ratchet a trailing stop upward as price rises
                 if stop:
@@ -182,6 +210,7 @@ class AlwaysOnAgent:
                     trail = px * (1 - 0.02 * atr_mult)
                     if trail > stop:
                         self.state.stops[pos.ticker] = round(trail, 2)
+        return triggered
 
     # -- main loop --
     def run_forever(self, execute: bool = False, once: bool = False,

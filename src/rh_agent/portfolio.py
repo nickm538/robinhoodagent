@@ -75,6 +75,7 @@ class PortfolioBuilder:
         # ---- 6) materialise target positions w/ stops ----
         rc = self.p.get("risk_controls", {})
         out: list[TargetPosition] = []
+        per_trade_risk = float(rc.get("per_trade_risk_pct", 0.0) or 0.0)
         for v in selected:
             t = v.ticker
             if t not in weights:
@@ -84,13 +85,22 @@ class PortfolioBuilder:
             if not px:
                 continue
             atr = td.technicals.get("atr")
-            dollars = weights[t] * equity
+            stop_price = atr_stop(px, atr, rc.get("stop_loss_atr_mult", 2.5),
+                                  rc.get("hard_stop_pct", 0.18))
+            weight = weights[t]
+            # Optional hard risk budget: cap weight so loss at stop is bounded.
+            if per_trade_risk > 0 and stop_price and stop_price < px:
+                loss_frac = (px - stop_price) / px
+                if loss_frac > 0:
+                    weight = min(weight, per_trade_risk / loss_frac)
+            if weight < min_w * 0.5:
+                continue
+            dollars = weight * equity
             tp = TargetPosition(
-                ticker=t, weight=round(weights[t], 4), score=round(v.composite, 1),
+                ticker=t, weight=round(weight, 4), score=round(v.composite, 1),
                 dollars=round(dollars, 2), shares=round(dollars / px, 4),
                 sector=td.sector,
-                stop_price=atr_stop(px, atr, rc.get("stop_loss_atr_mult", 2.5),
-                                    rc.get("hard_stop_pct", 0.18)),
+                stop_price=stop_price,
                 take_profit=take_profit(px, atr, rc.get("take_profit_atr_mult", 6.0)),
                 rationale=v.rationale,
             )

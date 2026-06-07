@@ -40,6 +40,7 @@ class RunResult:
     scan: ScanResult
     account: Account
     orders: list[Order]
+    post_account: Account | None = None
     fills: list[dict] = field(default_factory=list)
     executed: bool = False
     mode: str = "paper"
@@ -214,8 +215,8 @@ class TradingAgent:
                     return RobinhoodMCPBroker(url, tok, account_number=acct)
                 except Exception as e:
                     log.error("Robinhood token broker unavailable: %s", e)
-            log.error("Live armed but no Robinhood auth (run `rh-agent auth` or set "
-                      "ROBINHOOD_MCP_TOKEN). Falling back to PAPER.")
+            raise RuntimeError("Live trading armed but no Robinhood auth "
+                               "(run `rh-agent auth` or set ROBINHOOD_MCP_TOKEN).")
         return PaperBroker(self.price_fn, starting_cash=self.default_equity(),
                            slippage_bps=self.cfg.get("backtest.slippage_bps", 5.0))
 
@@ -240,13 +241,19 @@ class TradingAgent:
         # dry_run gates only the LIVE brokerage. The paper broker always
         # simulates fills when we intend to execute (it has no real account).
         fills: list[dict] = []
+        post_account: Account | None = None
         if execute:
             for o in orders:
                 fills.append(broker.place_order(o, dry_run=False))
+            try:
+                post_account = broker.get_account()
+            except Exception as e:
+                log.warning("post-trade account refresh failed: %s", e)
         mode = "live" if live else "paper"
         if execute and not live:
             log.info("executed in PAPER mode (simulated fills on live prices)")
-        return RunResult(scan=scan, account=account, orders=orders, fills=fills,
+        return RunResult(scan=scan, account=account, post_account=post_account,
+                         orders=orders, fills=fills,
                          executed=execute, mode=mode)
 
     # ---- backtest ----
