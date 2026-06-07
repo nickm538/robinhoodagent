@@ -8,7 +8,8 @@ COPY config ./config
 COPY scripts ./scripts
 
 ENV PYTHONPATH=/app/src \
-    EXECUTION_MODE=paper
+    EXECUTION_MODE=live \
+    LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY
 
 # Default: run the always-on loop. Override CMD for scan/backtest.
 # Provide API keys + (optional) Robinhood OAuth token via -e / --env-file.

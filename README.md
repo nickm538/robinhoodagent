@@ -3,15 +3,14 @@
 A production-grade, **always-on** trading agent that scans the equity universe,
 scores every name through a **panel of five veteran-trader personas**, adapts its
 weighting to the **current market regime**, sizes positions with real risk
-controls, and executes through the **Robinhood Agentic Trading MCP** — or in safe
-**paper mode** by default.
+controls, and executes through the **Robinhood Agentic Trading MCP** in your
+**live Agentic account** (real money). Paper mode remains available for testing.
 
 > **Goal:** strong, risk-adjusted outperformance of the S&P 500 / Dow over 1–3
 > month horizons. **Honest reality:** no system can *guarantee* beating — let
 > alone doubling — the index. Markets are adversarial and this trades **real
-> money**. The agent is engineered to tilt the odds with disciplined, multi-factor,
-> regime-aware decisions and hard risk limits — not to promise miracles. Run it in
-> paper mode until *you* are convinced. See [Safety & expectations](#safety--honest-expectations).
+> money**. Run `EXECUTION_MODE=paper` in `.env` if you want to test without
+> placing orders. See [Safety & expectations](#safety--honest-expectations).
 
 ---
 
@@ -108,7 +107,7 @@ agent to manage.
 # Rank the universe and print the target book (no orders placed)
 python -m rh_agent.cli scan --md
 
-# Scan + reconcile vs your account + show orders (paper fills by default)
+# Scan + reconcile vs your account + show orders (live when armed in .env)
 python -m rh_agent.cli run --execute
 
 # Walk-forward backtest vs SPY
@@ -118,9 +117,10 @@ python -m rh_agent.cli backtest
 python -m rh_agent.cli status
 ```
 
-Default `EXECUTION_MODE=paper` → simulated fills on **live prices**, no brokerage
-contact. To go live you must set **both** `EXECUTION_MODE=live` and
-`LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` (and provide the Robinhood token).
+Default `.env` (from `.env.example`) uses `EXECUTION_MODE=live` and
+`LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` — **real orders** in your Robinhood
+*Agentic* account after `rh-agent auth`. For safe testing, set `EXECUTION_MODE=paper`
+and clear `LIVE_TRADING_CONFIRM`.
 
 ### Try it right now with the bundled live snapshot
 
@@ -132,7 +132,7 @@ To regenerate a snapshot from your own captured price files, use
 ## Always-on, hands-off (the autonomous loop)
 
 ```bash
-# Foreground (paper)
+# Foreground (live — ensure .env is configured and `rh-agent auth` is done)
 python -m rh_agent.cli loop --execute
 
 # Resilient wrapper (auto-restarts), logs to logs/loop.log
@@ -170,10 +170,10 @@ On your own server/VPS there is no such restriction.
 
 ## Safety & honest expectations
 
-* **Real money, real risk.** You can lose money. Start in paper mode.
+* **Real money, real risk.** You can lose money. Use `EXECUTION_MODE=paper` to test.
 * **No performance guarantee.** The 2× S&P "north star" is an aspiration, not a
   promise. Backtests have selection/look-ahead caveats (see `RESULTS.md`).
-* **Defense in depth:** paper default · explicit live opt-in · Robinhood's
+* **Defense in depth:** explicit live opt-in via `.env` · Robinhood's
   separate Agentic account · per-name (10%) and per-sector (35%) caps · ATR
   trailing stops · hard -18% stop · daily drawdown halt · liquidity floor
   (no penny stocks / illiquid names).

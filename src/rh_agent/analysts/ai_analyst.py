@@ -86,7 +86,7 @@ class AIAnalyst:
     def __init__(self, cfg: Config):
         a = cfg.get("ai_analyst", {}) or {}
         self.cfg = cfg
-        self.model = os.getenv("RH_AI_MODEL", a.get("model", "claude-sonnet-4-6"))
+        self.model = os.getenv("RH_AI_MODEL", a.get("model", "claude-opus-4-8"))
         self.effort = a.get("effort", "low")          # low|medium|high (cost vs depth)
         self.weight = max(0.0, min(1.0, float(a.get("weight", 0.25))))  # blend weight, clamped [0,1]
         self.max_candidates = int(a.get("max_candidates", 15))

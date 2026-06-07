@@ -15,6 +15,12 @@ meta:
   base_currency: "USD"
 
 # ----------------------------------------------------------------------
+# EXECUTION  — real-money Agentic account (override via .env if needed)
+# ----------------------------------------------------------------------
+execution:
+  mode: "live"                   # live | paper — this deployment trades real money
+
+# ----------------------------------------------------------------------
 # DATA PROVIDERS  — priority/fallback order. The MarketData facade tries
 # them in order and uses the first that answers. MBOUM + FinancialDatasets
 # are prioritized per mandate.
