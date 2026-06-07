@@ -322,9 +322,19 @@ class RobinhoodMCPBroker(Broker):
 
     def cancel_all(self) -> None:
         try:
-            for o in self.get_orders():
-                oid = o.get("id") if isinstance(o, dict) else None
-                if oid:
-                    self._call("cancel", {"order_id": oid, "id": oid})
+            orders = self.get_orders()
         except Exception as e:
-            log.warning("cancel_all failed: %s", e)
+            log.warning("cancel_all: could not list open orders: %s", e)
+            return
+        # Cancel each order independently: this is a safety operation, so one
+        # failed cancel must not strand the remaining open orders. (There is no
+        # bulk-cancel tool, and the JSON-RPC client is not thread-safe, so these
+        # stay sequential.)
+        for o in orders:
+            oid = o.get("id") if isinstance(o, dict) else None
+            if not oid:
+                continue
+            try:
+                self._call("cancel", {"order_id": oid, "id": oid})
+            except Exception as e:
+                log.warning("cancel_all: failed to cancel order %s: %s", oid, e)
