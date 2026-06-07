@@ -20,6 +20,7 @@ from ..logging_setup import get_logger
 from ..models import Account, Order, Position
 from .base import Broker
 from .mcp_client import MCPHttpClient, MCPError
+from .orders import stable_ref_id
 
 log = get_logger("broker.rh")
 
@@ -103,7 +104,8 @@ def pick_account_number(raw) -> str | None:
     return None
 
 
-def parse_account(prof, positions_raw, account_number: str | None) -> Account:
+def parse_account(prof, positions_raw, account_number: str | None, *,
+                  portfolio_ok: bool = True, positions_ok: bool = True) -> Account:
     # Robinhood get_portfolio: data.total_value / data.cash / data.buying_power.buying_power
     # (all strings). get_equity_positions: data.positions[].
     d = prof.get("data", prof) if isinstance(prof, dict) else {}
@@ -118,26 +120,38 @@ def parse_account(prof, positions_raw, account_number: str | None) -> Account:
     bp = _to_num(bp_obj.get("buying_power")) if isinstance(bp_obj, dict) else _to_num(bp_obj)
     if bp is None:
         bp = _walk_num(prof, "buying_power")
+    bp_confirmed = bp is not None
+    # Never default buying power to total equity — that over-authorizes buys.
+    if bp is None:
+        bp = cash if cash is not None else 0.0
 
     positions = []
-    for p in _unwrap_rows(positions_raw, ["positions", "results"]):
-        if not isinstance(p, dict):
-            continue
-        qty = _to_num(p.get("quantity") or p.get("shares"))
-        if not qty:
-            continue
-        avg = _to_num(p.get("average_buy_price") or p.get("average_cost")
-                      or p.get("cost_basis") or p.get("avg_price")) or 0.0
-        px = _to_num(p.get("price") or p.get("current_price") or p.get("last_price")) or avg
-        positions.append(Position(ticker=p.get("symbol") or p.get("ticker"), quantity=qty,
-                                  avg_price=avg, current_price=px,
-                                  market_value=round(qty * px, 2)))
-    if not equity:
+    if positions_ok and positions_raw is not None:
+        for p in _unwrap_rows(positions_raw, ["positions", "results"]):
+            if not isinstance(p, dict):
+                continue
+            qty = _to_num(p.get("quantity") or p.get("shares"))
+            if not qty:
+                continue
+            avg = _to_num(p.get("average_buy_price") or p.get("average_cost")
+                          or p.get("cost_basis") or p.get("avg_price")) or 0.0
+            px = _to_num(p.get("price") or p.get("current_price") or p.get("last_price")) or avg
+            positions.append(Position(ticker=p.get("symbol") or p.get("ticker"), quantity=qty,
+                                      avg_price=avg, current_price=px,
+                                      market_value=round(qty * px, 2)))
+    if portfolio_ok and not equity and positions_ok:
         equity = (cash or 0.0) + sum(p.market_value for p in positions)
-    return Account(equity=round(equity or 0.0, 2), cash=round(cash or 0.0, 2),
-                   buying_power=round(bp if bp is not None else (cash or equity or 0.0), 2),
-                   positions=positions, account_number=account_number or "agentic",
-                   source="robinhood")
+    return Account(
+        equity=round(equity or 0.0, 2),
+        cash=round(cash or 0.0, 2),
+        buying_power=round(bp or 0.0, 2),
+        positions=positions,
+        account_number=account_number or "agentic",
+        source="robinhood",
+        portfolio_confirmed=portfolio_ok and prof is not None,
+        positions_confirmed=positions_ok and positions_raw is not None,
+        buying_power_confirmed=bp_confirmed,
+    )
 
 
 def _fmt_num(x) -> str:
@@ -166,9 +180,8 @@ def order_args(order: Order, dry_run: bool, account_number: str | None) -> dict:
         if "quantity" not in args and order.quantity is not None:
             args["quantity"] = _fmt_num(order.quantity)
 
-    if not dry_run:                                              # idempotency key for live places
-        import uuid
-        args["ref_id"] = str(uuid.uuid4())
+    if not dry_run:
+        args["ref_id"] = stable_ref_id(order, account_number)
     return args
 
 
@@ -209,28 +222,55 @@ class RobinhoodMCPBroker(Broker):
             raise MCPError(f"no Robinhood MCP tool for capability '{cap}'")
         return self.client.call_tool(tool, args or {})
 
+    def _resolve_account_number(self) -> str | None:
+        if self.account_number:
+            return self.account_number
+        if not self.map.get("accounts"):
+            return None
+        try:
+            accts = self._call("accounts", {})
+            self.account_number = pick_account_number(accts)
+            if self.account_number:
+                log.info("using Robinhood account %s", self.account_number)
+        except Exception as e:
+            log.warning("account resolve failed: %s", e)
+        return self.account_number
+
     # ------------------------------------------------------------------ account
     def get_account(self) -> Account:
-        acct_no = self.account_number
+        acct_no = self._resolve_account_number()
         prof = positions_raw = None
+        prof_ok = pos_ok = False
+        args = {} if not acct_no else {"account_number": acct_no}
         try:
-            prof = self._call("buying_power", {} if not acct_no else {"account_number": acct_no})
+            prof = self._call("buying_power", args)
+            prof_ok = prof is not None
         except Exception as e:
             log.warning("buying_power read failed: %s", e)
         try:
-            positions_raw = self._call("positions", {} if not acct_no else {"account_number": acct_no})
+            positions_raw = self._call("positions", args)
+            pos_ok = True
         except Exception as e:
             log.warning("positions read failed: %s", e)
-        return parse_account(prof, positions_raw, acct_no)
+        return parse_account(prof, positions_raw, acct_no,
+                             portfolio_ok=prof_ok, positions_ok=pos_ok)
 
     # ------------------------------------------------------------------ orders
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
+        acct = self._resolve_account_number()
+        args = order_args(order, dry_run, acct)
         if dry_run:
-            # If the live tool can't preview, return our own preview rather than risk a send.
+            if self.map.get("review_order"):
+                try:
+                    detail = self._call("review_order", args)
+                    return {"status": "preview", "ticker": order.ticker, "side": order.side,
+                            "qty": order.quantity, "result": detail}
+                except Exception as e:
+                    log.warning("review_order failed: %s", e)
             return {"status": "preview", "ticker": order.ticker, "side": order.side,
-                    "qty": order.quantity, "note": "dry_run (not transmitted unless tool previews)"}
+                    "qty": order.quantity, "note": "dry_run (not transmitted)"}
         try:
-            res = self._call("place_order", order_args(order, dry_run, self.account_number))
+            res = self._call("place_order", args)
         except Exception as e:
             log.error("live order FAILED %s %s: %s", order.side, order.ticker, e)
             return {"status": "error", "ticker": order.ticker, "error": str(e)}

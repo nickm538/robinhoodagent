@@ -135,7 +135,8 @@ def test_robinhood_parse_account_portfolio_shape():
     prof = {"data": {"total_value": "412.50", "equity_value": "0.00", "cash": "412.50",
                      "buying_power": {"buying_power": "400.00",
                                       "unleveraged_buying_power": "400.00"}}, "guide": "..."}
-    acct = parse_account(prof, {"data": {"positions": []}}, "AGENT123")
+    acct = parse_account(prof, {"data": {"positions": []}}, "AGENT123",
+                         portfolio_ok=True, positions_ok=True)
     assert acct.equity == 412.50          # total_value, NOT equity_value (0)
     assert acct.cash == 412.50
     assert acct.buying_power == 400.00
@@ -143,8 +144,10 @@ def test_robinhood_parse_account_portfolio_shape():
     # a genuinely empty account: total_value "0.00" must stay 0.0, not be masked
     flat = parse_account({"data": {"total_value": "0.00", "cash": "0.00",
                                    "buying_power": {"buying_power": "0.00"}}},
-                         {"data": {"positions": []}}, "AGENT123")
+                         {"data": {"positions": []}}, "AGENT123",
+                         portfolio_ok=True, positions_ok=True)
     assert flat.equity == 0.0 and flat.buying_power == 0.0
+    assert flat.reliable is False
 
 
 def test_build_orders_respects_buying_power():
@@ -202,8 +205,12 @@ def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
     p.write_text('{"last_rebalance":"x","stops":"GARBAGE","take_profits":42,"bogus":1}')
     st = daemon.DaemonState.load()
     assert st.stops == {} and st.take_profits == {}      # coerced to dicts
-    assert st.last_rebalance == "x"                       # known field preserved
+    assert st.last_rebalance == ""                        # invalid iso reset
     # totally invalid json -> fresh state, no crash
     p.write_text("{not valid json")
     st2 = daemon.DaemonState.load()
     assert st2.stops == {} and st2.take_profits == {}
+    # invalid last_rebalance is reset (not preserved as "x")
+    p.write_text('{"last_rebalance":"x","stops":{},"take_profits":{}}')
+    st3 = daemon.DaemonState.load()
+    assert st3.last_rebalance == ""

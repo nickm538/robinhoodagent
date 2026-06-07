@@ -62,12 +62,16 @@ class TradingAgent:
     def default_equity(self) -> float:
         return float(os.getenv("PAPER_EQUITY", self.cfg.get("backtest.initial_equity", 100_000)))
 
-    def price_fn(self, ticker: str) -> float | None:
-        if ticker in self._quote_cache:
+    def price_fn(self, ticker: str, *, for_risk: bool = False) -> float | None:
+        if not for_risk and ticker in self._quote_cache:
             return self._quote_cache[ticker]
-        q = self.md.get_quote(ticker)
+        if for_risk:
+            q = self.md.get_quote_for_risk(ticker)
+        else:
+            q = self.md.get_quote(ticker)
         px = q.price if q else None
-        self._quote_cache[ticker] = px
+        if not for_risk:
+            self._quote_cache[ticker] = px
         return px
 
     def clear_price_cache(self) -> None:
@@ -192,6 +196,7 @@ class TradingAgent:
 
     # ---- broker ----
     def make_broker(self):
+        from .broker.errors import LiveBrokerUnavailable
         from .broker.paper import PaperBroker
         if self.cfg.live_trading_armed:
             acct = os.getenv("ROBINHOOD_ACCOUNT_NUMBER")
@@ -214,27 +219,28 @@ class TradingAgent:
                     return RobinhoodMCPBroker(url, tok, account_number=acct)
                 except Exception as e:
                     log.error("Robinhood token broker unavailable: %s", e)
-            log.error("Live armed but no Robinhood auth (run `rh-agent auth` or set "
-                      "ROBINHOOD_MCP_TOKEN). Falling back to PAPER.")
+            raise LiveBrokerUnavailable(
+                "Live trading is armed but Robinhood auth is unavailable. "
+                "Run `rh-agent auth` or set ROBINHOOD_MCP_TOKEN — will NOT fall back to paper."
+            )
         return PaperBroker(self.price_fn, starting_cash=self.default_equity(),
                            slippage_bps=self.cfg.get("backtest.slippage_bps", 5.0))
 
     # ---- full run ----
-    def run(self, execute: bool = False, tickers: list[str] | None = None) -> RunResult:
+    def run(self, execute: bool = False, tickers: list[str] | None = None, *,
+            allow_buys: bool = True, exclude_tickers: set[str] | None = None) -> RunResult:
         broker = self.make_broker()
         account = broker.get_account()
-        # NEVER size a LIVE account on the paper default. If a live balance reads
-        # as 0 (e.g. a portfolio-fetch hiccup), skip the cycle ENTIRELY — no scan,
-        # no orders — rather than risk over-sizing on the default equity.
-        if broker.supports_live and not (account.equity and account.equity > 0):
-            log.error("live account equity read as 0 — skipping cycle entirely (no orders)")
+        if broker.supports_live and not account.reliable:
+            log.error("live account snapshot unreliable — skipping cycle entirely (no orders)")
             empty = ScanResult(regime=RegimeResult("halted", {}, 0.0), verdicts=[], eligible=[],
                                targets=[], equity=0.0, universe_size=0, scored_size=0)
             return RunResult(scan=empty, account=account, orders=[], fills=[], executed=False,
                              mode="live")
         equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
         scan = self.scan(equity=equity, tickers=tickers)
-        orders = build_orders(account, scan.targets, self.cfg, self.price_fn)
+        orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
+                              allow_buys=allow_buys, exclude_tickers=exclude_tickers)
 
         live = self.cfg.live_trading_armed and broker.supports_live
         # dry_run gates only the LIVE brokerage. The paper broker always

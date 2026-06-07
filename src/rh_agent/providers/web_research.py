@@ -118,12 +118,13 @@ class WebResearchProvider(DataProvider):
         text = self._search_text(f"{ticker} stock news today", ttl=120, limit=6).lower()
         if not text:
             raise ProviderUnsupported
-        pos = sum(text.count(w) for w in
-                  ["beat", "surge", "soar", "upgrade", "record", "rally", "raises", "tops",
-                   "outperform", "jumps", "strong"])
-        neg = sum(text.count(w) for w in
-                  ["miss", "plunge", "downgrade", "lawsuit", "probe", "cut", "warns",
-                   "slump", "falls", "weak", "halts"])
+        pos_words = [r"\bbeat\b", r"\bsurge\b", r"\bsoar\b", r"\bupgrade\b", r"\brecord\b",
+                     r"\brally\b", r"\braises\b", r"\btops\b", r"\boutperform\b",
+                     r"\bjumps\b", r"\bstrong\b"]
+        neg_words = [r"\bmiss\b", r"\bplunge\b", r"\bdowngrade\b", r"\blawsuit\b", r"\bprobe\b",
+                     r"\bcut\b", r"\bwarns\b", r"\bslump\b", r"\bfalls\b", r"\bweak\b", r"\bhalts\b"]
+        pos = sum(len(re.findall(w, text)) for w in pos_words)
+        neg = sum(len(re.findall(w, text)) for w in neg_words)
         tot = pos + neg
         if tot == 0:
             raise ProviderUnsupported

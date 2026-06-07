@@ -114,15 +114,18 @@ class RobinhoodSDKBroker(Broker):
             acct = await self._resolve_account(session)
             a = {"account_number": acct} if acct else {}
             prof = pos = None
+            prof_ok = pos_ok = False
             try:
                 prof = await self._call(session, "buying_power", a)   # -> get_portfolio
+                prof_ok = prof is not None
             except Exception as e:
                 log.warning("portfolio read failed: %s", e)
             try:
                 pos = await self._call(session, "positions", a)       # -> get_equity_positions
+                pos_ok = True
             except Exception as e:
                 log.warning("positions read failed: %s", e)
-            return parse_account(prof, pos, acct)
+            return parse_account(prof, pos, acct, portfolio_ok=prof_ok, positions_ok=pos_ok)
         return self._run(fn)
 
     def place_order(self, order: Order, dry_run: bool = True) -> dict:
