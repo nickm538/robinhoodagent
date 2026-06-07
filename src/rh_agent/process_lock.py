@@ -20,7 +20,7 @@ class ProcessLockError(RuntimeError):
 def daemon_lock(path: Path = DEFAULT_LOCK):
     """Acquire an exclusive non-blocking lock; raise if another instance holds it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(path, "w")
+    fh = open(path, "a+")
     try:
         if os.name == "nt":
             import msvcrt
