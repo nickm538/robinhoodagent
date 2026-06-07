@@ -54,6 +54,27 @@ def test_validate_mcp_url_rejects_bad_scheme_or_empty():
             validate_mcp_url(bad)
 
 
+def test_validate_mcp_url_rejects_plaintext_to_bind_all_address():
+    # 0.0.0.0 is a bind-all address, not loopback -> plaintext must be rejected
+    with pytest.raises(MCPError):
+        validate_mcp_url("http://0.0.0.0/mcp")
+
+
+def test_validate_mcp_url_rejects_invalid_port():
+    # a non-numeric/out-of-range port should fail with a clear MCPError, not a
+    # low-level requests error later on
+    for bad in ("https://host:abc/path", "https://host:99999/path"):
+        with pytest.raises(MCPError):
+            validate_mcp_url(bad)
+
+
+def test_robinhood_sdk_broker_validates_url_before_sdk():
+    # URL validation happens first, so a bad endpoint fails fast (no SDK needed)
+    from rh_agent.broker.robinhood_sdk import RobinhoodSDKBroker
+    with pytest.raises(MCPError):
+        RobinhoodSDKBroker("ftp://nope/mcp")
+
+
 def test_make_provider_validates_url_before_sdk():
     # The OAuth chokepoint must reject a bad endpoint before anything else,
     # so the bearer token is never presented to it (independent of the SDK).

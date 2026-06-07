@@ -20,7 +20,8 @@ log = get_logger("mcp")
 PROTOCOL_VERSION = "2025-06-18"
 
 # Loopback hosts where plain http is tolerated (local dev / mock MCP servers).
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+# Only true loopback names — 0.0.0.0 is a bind-all address, not loopback.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class MCPError(Exception):
@@ -41,6 +42,10 @@ def validate_mcp_url(url: str) -> str:
     host = parsed.hostname or ""
     if parsed.scheme not in ("http", "https") or not host:
         raise MCPError(f"MCP URL must be an http(s) URL with a host, got {url!r}.")
+    try:
+        parsed.port  # raises ValueError on a non-numeric/out-of-range port
+    except ValueError as e:
+        raise MCPError(f"MCP URL has an invalid port: {url!r}.") from e
     is_loopback = host in _LOCAL_HOSTS
     if not is_loopback:
         try:

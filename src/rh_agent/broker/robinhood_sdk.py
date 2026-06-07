@@ -61,10 +61,12 @@ class RobinhoodSDKBroker(Broker):
     supports_live = True
 
     def __init__(self, url: str, account_number: str | None = None):
+        # Validate the endpoint before anything else (independent of the SDK),
+        # so a misconfigured URL fails fast and consistently with the other paths.
+        self.url = validate_mcp_url(url)
         _require_sdk()
         if not FileTokenStorage().has_tokens():
             raise RuntimeError("No Robinhood OAuth tokens found. Run `rh-agent auth` first.")
-        self.url = validate_mcp_url(url)
         self.account_number = account_number
         self._map: dict | None = None
         log.info("Robinhood SDK broker ready (auto-refreshing OAuth)")
