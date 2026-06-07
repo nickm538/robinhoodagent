@@ -76,12 +76,14 @@ class MarketData:
 
     def get_quote_for_risk(self, t: str, max_age_seconds: float = 180) -> Quote | None:
         """Fetch a quote for stop/TP decisions, bypassing stale disk cache when needed."""
-        self._invalidate_quote_cache(t)
         q = self._try("quote", "get_quote", t)
         if q and q.price:
             age = (utcnow() - q.asof).total_seconds()
             if age <= max_age_seconds:
                 return q
+        # missing/stale -> invalidate disk cache and retry once
+        self._invalidate_quote_cache(t)
+        q = self._try("quote", "get_quote", t)
         return q if q and q.price else None
 
     def _invalidate_quote_cache(self, ticker: str) -> None:
