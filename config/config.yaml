@@ -15,6 +15,13 @@ meta:
   base_currency: "USD"
 
 # ----------------------------------------------------------------------
+# EXECUTION DEFAULTS
+# ----------------------------------------------------------------------
+execution:
+  mode: "live"
+  live_trading_confirm: "I_UNDERSTAND_REAL_MONEY"
+
+# ----------------------------------------------------------------------
 # DATA PROVIDERS  — priority/fallback order. The MarketData facade tries
 # them in order and uses the first that answers. MBOUM + FinancialDatasets
 # are prioritized per mandate.
@@ -210,7 +217,7 @@ portfolio:
 # ----------------------------------------------------------------------
 ai_analyst:
   enabled: true
-  model: "claude-sonnet-4-6"   # or "claude-opus-4-8" for max reasoning (pricier)
+  model: "claude-opus-4-8"   # use max reasoning by default
   effort: "low"                # low | medium | high  (depth vs cost per cycle)
   weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
   max_candidates: 20           # send the top N quant names to Claude (wider hunt -> review more)

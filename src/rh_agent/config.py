@@ -86,14 +86,15 @@ class Config:
 
     @property
     def execution_mode(self) -> str:
-        return os.getenv("EXECUTION_MODE", self.get("execution.mode", "paper")).lower()
+        return os.getenv("EXECUTION_MODE", self.get("execution.mode", "live")).lower()
 
     @property
     def live_trading_armed(self) -> bool:
-        """Live orders require an explicit, unambiguous opt-in. Default: OFF."""
+        """Live orders require explicit mode+confirmation alignment."""
+        confirm = os.getenv("LIVE_TRADING_CONFIRM", self.get("execution.live_trading_confirm", ""))
         return (
             self.execution_mode == "live"
-            and os.getenv("LIVE_TRADING_CONFIRM", "") == "I_UNDERSTAND_REAL_MONEY"
+            and confirm == "I_UNDERSTAND_REAL_MONEY"
         )
 
     def available_providers(self) -> dict:

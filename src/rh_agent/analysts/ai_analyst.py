@@ -11,7 +11,7 @@ Design choices (per the claude-api skill):
     thinking, effort configurable.
   * Static system prompt is prompt-cached; only the volatile per-cycle data
     goes in the user turn (after the cached prefix).
-  * Model selectable: claude-sonnet-4-6 (default) or claude-opus-4-8.
+  * Model selectable: claude-opus-4-8 (default) or claude-sonnet-4-6.
   * GRACEFUL NO-OP: if ANTHROPIC_API_KEY or the SDK is missing, or the call
     errors, it returns nothing and the agent runs pure-quant exactly as before.
 """
@@ -86,7 +86,7 @@ class AIAnalyst:
     def __init__(self, cfg: Config):
         a = cfg.get("ai_analyst", {}) or {}
         self.cfg = cfg
-        self.model = os.getenv("RH_AI_MODEL", a.get("model", "claude-sonnet-4-6"))
+        self.model = os.getenv("RH_AI_MODEL", a.get("model", "claude-opus-4-8"))
         self.effort = a.get("effort", "low")          # low|medium|high (cost vs depth)
         self.weight = max(0.0, min(1.0, float(a.get("weight", 0.25))))  # blend weight, clamped [0,1]
         self.max_candidates = int(a.get("max_candidates", 15))
