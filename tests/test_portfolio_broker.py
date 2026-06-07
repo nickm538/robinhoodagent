@@ -275,6 +275,64 @@ def test_daemon_manage_risk_clears_stop_on_confirmed_order():
     assert "AAA" not in d.state.stops
 
 
+def test_daemon_rebalance_prunes_pending_risk_for_unheld(tmp_path, monkeypatch):
+    """A name stuck in pending_risk but no longer held must be released on
+    rebalance, so it is not permanently excluded from re-entry."""
+    import rh_agent.daemon as daemon
+    from rh_agent.agent import RunResult, ScanResult
+    from rh_agent.regime import RegimeResult
+    monkeypatch.setattr(daemon, "STATE", tmp_path / "daemon_state.json")
+
+    d = daemon.AlwaysOnAgent.__new__(daemon.AlwaysOnAgent)
+    d.cfg = load_config()
+    d.d = {}
+    # Only AAA is actually held; GONE left the book another way but lingers in state.
+    held_acct = Account(equity=1_000.0, cash=0.0, buying_power=0.0, source="paper",
+                        positions=[Position("AAA", 1.0, 100.0, current_price=100.0)])
+    d.state = daemon.DaemonState(
+        last_rebalance="", day_start_equity=1_000.0,
+        stops={"AAA": 90.0, "GONE": 50.0}, take_profits={},
+        high_water={"AAA": 100.0, "GONE": 60.0},
+        pending_risk={"AAA": "stop", "GONE": "stop"},
+    )
+
+    empty_scan = ScanResult(regime=RegimeResult("neutral", {}, 0.0), verdicts=[],
+                            eligible=[], targets=[], equity=1_000.0,
+                            universe_size=0, scored_size=0)
+    run = RunResult(scan=empty_scan, account=held_acct, post_account=held_acct,
+                    orders=[], fills=[], executed=False, mode="paper")
+
+    class _Brk:
+        supports_live = False
+        def get_account(self):
+            return held_acct
+
+    class _Agent:
+        def clear_price_cache(self):
+            pass
+        def make_broker(self):
+            return _Brk()
+        def run(self, **kw):
+            return run
+        def price_fn(self, t, for_risk=False):
+            return 100.0
+
+    d.agent = _Agent()
+    # Isolate the rebalance pruning path from risk/stop side effects.
+    d._manage_risk = lambda *a, **k: set()
+    d._ensure_stops_for_held = lambda *a, **k: None
+    d._due_for_rebalance = lambda now: True
+
+    d.tick(execute=False)
+
+    # The fix: unheld GONE is released from pending_risk (and the other state maps).
+    assert "GONE" not in d.state.pending_risk
+    assert "GONE" not in d.state.stops
+    assert "GONE" not in d.state.high_water
+    # Still-held AAA is retained.
+    assert "AAA" in d.state.pending_risk
+
+
 def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
     # a corrupt/garbage state file must never crash the 24/7 loop at boot
     import rh_agent.daemon as daemon

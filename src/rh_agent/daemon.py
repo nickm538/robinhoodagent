@@ -202,6 +202,10 @@ class AlwaysOnAgent:
             self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
             self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
             self.state.high_water = {k: v for k, v in self.state.high_water.items() if k in held}
+            # Prune pending-risk flags for names no longer held, so a name that left
+            # the book another way (manual sale, unrecognized fill status) is not
+            # permanently excluded from future re-entry.
+            self.state.pending_risk = {k: v for k, v in self.state.pending_risk.items() if k in held}
             self.state.last_rebalance = now.isoformat()
             log.info("rebalanced: %d targets, %d orders (%s)",
                      len(run.scan.targets), len(run.orders), run.mode)
