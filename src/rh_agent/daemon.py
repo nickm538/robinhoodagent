@@ -40,6 +40,14 @@ log = get_logger("daemon")
 STATE = REPO_ROOT / "state" / "daemon_state.json"
 
 
+def _harden_state_path(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+
+
 @dataclass
 class DaemonState:
     last_rebalance: str = ""
@@ -74,8 +82,12 @@ class DaemonState:
         return cls(stops={}, take_profits={}, high_water={}, pending_risk={})
 
     def save(self) -> None:
-        STATE.parent.mkdir(parents=True, exist_ok=True)
+        _harden_state_path(STATE)
         STATE.write_text(json.dumps(self.__dict__, indent=2, default=str))
+        try:
+            STATE.chmod(0o600)
+        except OSError:
+            pass
 
 
 def _valid_iso(s: str) -> bool:

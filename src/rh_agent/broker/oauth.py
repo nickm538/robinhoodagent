@@ -25,6 +25,14 @@ log = get_logger("oauth")
 TOKEN_FILE = REPO_ROOT / "state" / "robinhood_oauth.json"
 
 
+def _harden_state_path(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+
+
 def _require_sdk():
     try:
         import mcp  # noqa: F401
@@ -46,7 +54,7 @@ class FileTokenStorage:
         return json.loads(self.path.read_text()) if self.path.exists() else {}
 
     def _save(self, d: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        _harden_state_path(self.path)
         self.path.write_text(json.dumps(d, indent=2, default=str))
         try:
             self.path.chmod(0o600)
@@ -151,6 +159,7 @@ def make_provider(server_url: str, port: int = 8765, interactive: bool = True):
 
 
 async def _authenticate(server_url: str, port: int = 8765) -> list[str]:
+    server_url = validate_mcp_url(server_url)
     _require_sdk()
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamablehttp_client

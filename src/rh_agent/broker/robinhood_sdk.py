@@ -196,6 +196,7 @@ def probe(url: str, sample_ticker: str = "AAPL") -> dict:
 
 
 async def _probe(url: str, sample_ticker: str) -> dict:
+    url = validate_mcp_url(url)
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 

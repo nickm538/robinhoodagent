@@ -16,10 +16,19 @@ class ProcessLockError(RuntimeError):
     pass
 
 
+def _harden_state_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        # Best effort on filesystems/platforms that ignore chmod.
+        pass
+
+
 @contextmanager
 def daemon_lock(path: Path = DEFAULT_LOCK):
     """Acquire an exclusive non-blocking lock; raise if another instance holds it."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _harden_state_parent(path)
     fh = open(path, "a+")
     try:
         if os.name == "nt":
@@ -40,8 +49,14 @@ def daemon_lock(path: Path = DEFAULT_LOCK):
                 raise ProcessLockError(
                     f"Another rh-agent daemon holds {path} — refusing to start."
                 ) from e
-        fh.seek(0); fh.truncate(); fh.write(str(os.getpid()))
+        fh.seek(0)
+        fh.truncate()
+        fh.write(str(os.getpid()))
         fh.flush()
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
         log.info("acquired daemon lock %s", path)
         yield
     finally:

@@ -21,6 +21,14 @@ log = get_logger("broker.paper")
 STATE_PATH = REPO_ROOT / "state" / "paper_account.json"
 
 
+def _harden_state_path(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+
+
 class PaperBroker(Broker):
     name = "paper"
     supports_live = False
@@ -41,8 +49,12 @@ class PaperBroker(Broker):
         return s
 
     def _save(self, s: dict | None = None) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        _harden_state_path(self.state_path)
         self.state_path.write_text(json.dumps(s or self.state, indent=2, default=str))
+        try:
+            self.state_path.chmod(0o600)
+        except OSError:
+            pass
 
     def get_account(self) -> Account:
         positions = []

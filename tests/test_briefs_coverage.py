@@ -309,6 +309,9 @@ def test_daemon_lock_writes_pid_and_excludes_second_holder(tmp_path):
     with daemon_lock(p):
         assert p.exists()
         assert int(p.read_text()) == os.getpid()
+        if os.name != "nt":
+            assert (p.stat().st_mode & 0o777) == 0o600
+            assert (p.parent.stat().st_mode & 0o777) == 0o700
         with pytest.raises(ProcessLockError):
             with daemon_lock(p):
                 pass
@@ -323,6 +326,46 @@ def test_daemon_lock_reacquired_after_release(tmp_path):
     # lock released on exit -> a fresh acquisition succeeds
     with daemon_lock(p):
         assert p.exists()
+
+
+# ------------------------- state-file permissions -------------------------
+
+def test_daemon_state_save_uses_private_permissions(tmp_path, monkeypatch):
+    import rh_agent.daemon as daemon
+
+    p = tmp_path / "state" / "daemon_state.json"
+    monkeypatch.setattr(daemon, "STATE", p)
+    st = daemon.DaemonState(stops={}, take_profits={}, high_water={}, pending_risk={})
+    st.save()
+
+    assert p.exists()
+    if os.name != "nt":
+        assert (p.stat().st_mode & 0o777) == 0o600
+        assert (p.parent.stat().st_mode & 0o777) == 0o700
+
+
+def test_paper_broker_state_file_uses_private_permissions(tmp_path):
+    from rh_agent.broker.paper import PaperBroker
+
+    p = tmp_path / "state" / "paper_account.json"
+    PaperBroker(lambda _t: 100.0, starting_cash=1_000.0, state_path=p)
+    assert p.exists()
+    if os.name != "nt":
+        assert (p.stat().st_mode & 0o777) == 0o600
+        assert (p.parent.stat().st_mode & 0o777) == 0o700
+
+
+def test_oauth_token_storage_uses_private_permissions(tmp_path):
+    from rh_agent.broker.oauth import FileTokenStorage
+
+    p = tmp_path / "state" / "robinhood_oauth.json"
+    store = FileTokenStorage(path=p)
+    store._save({"tokens": {"access_token": "redacted"}})
+
+    assert p.exists()
+    if os.name != "nt":
+        assert (p.stat().st_mode & 0o777) == 0o600
+        assert (p.parent.stat().st_mode & 0o777) == 0o700
 
 
 # ------------------------------- risk -------------------------------
