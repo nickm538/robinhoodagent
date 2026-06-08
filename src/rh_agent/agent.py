@@ -57,6 +57,8 @@ class TradingAgent:
         self.builder = PortfolioBuilder(cfg)
         from .analysts.ai_analyst import AIAnalyst
         self.ai = AIAnalyst(cfg)
+        from .journal import Journal
+        self.journal = Journal(cfg)
         self._quote_cache: dict[str, float | None] = {}
 
     # ---- helpers ----
@@ -205,6 +207,9 @@ class TradingAgent:
                 "headlines": self.md.headlines(v.ticker, 5),
             })
         ctx = f"Regime: {regime.describe()}. Recent market headlines: {self.md.market_news(8)}"
+        perf = self.journal.performance_summary()
+        if perf:
+            ctx += f"\n{perf}"
         res = self.ai.assess(ctx, cands)
         if not res.views:
             return res.market_read or ""
@@ -335,6 +340,32 @@ class TradingAgent:
         equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
         held_tickers = [p.ticker for p in account.positions]
         scan = self.scan(equity=equity, tickers=tickers, include_tickers=held_tickers)
+        return self.reconcile_and_execute(
+            scan, execute=execute, allow_buys=allow_buys, exclude_tickers=exclude_tickers,
+            broker=broker, account=account, equity=equity)
+
+    def reconcile_and_execute(self, scan: ScanResult, *, execute: bool = False,
+                              allow_buys: bool = True, exclude_tickers: set[str] | None = None,
+                              broker=None, account: Account | None = None,
+                              equity: float | None = None) -> RunResult:
+        """Turn a (possibly pre-computed, off-thread) scan into orders and execute.
+
+        Split out from run() so the daemon can compute the slow scan in a
+        background worker while risk management keeps ticking, then reconcile
+        against a FRESH account snapshot here on the main thread. All broker I/O
+        lives in this method — the background scan never touches the broker.
+        """
+        if broker is None:
+            broker = self.make_broker()
+        if account is None:
+            account = broker.get_account()
+            if broker.supports_live and not account.reliable:
+                log.error("live account snapshot unreliable — skipping reconcile (no orders)")
+                live_now = self.cfg.live_trading_armed and broker.supports_live
+                return RunResult(scan=scan, account=account, orders=[], fills=[],
+                                 executed=False, mode="live" if live_now else "paper")
+        if equity is None:
+            equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
         scan = self._apply_hold_discipline(scan, account, equity)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
                               allow_buys=allow_buys, exclude_tickers=exclude_tickers)

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 
@@ -29,6 +30,7 @@ except Exception:  # pragma: no cover
 from .agent import TradingAgent
 from .broker.orders import order_succeeded
 from .config import REPO_ROOT, Config, write_private
+from .journal import Journal
 from .logging_setup import get_logger
 from .market_calendar import is_market_open
 from .models import Order
@@ -93,6 +95,14 @@ class AlwaysOnAgent:
         for attr in ("stops", "take_profits", "high_water", "pending_risk"):
             if getattr(self.state, attr) is None:
                 setattr(self.state, attr, {})
+        # Background scan worker: the slow rebalance scan (data + AI, ~minutes)
+        # runs here so stop/take-profit risk checks keep firing every tick on the
+        # main thread. The worker NEVER touches the broker — all order placement
+        # and state writes happen on the main thread when we consume its result.
+        self._scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rh-scan")
+        self._scan_future = None      # in-flight scan, or None
+        self._pending_scan = None     # finished scan awaiting a safe tick to execute
+        self.journal = Journal(self.cfg)
 
     # -- cadence --
     def _due_for_rebalance(self, now: datetime) -> bool:
@@ -138,7 +148,10 @@ class AlwaysOnAgent:
     # -- one cycle --
     def tick(self, execute: bool = False) -> None:
         now = datetime.now(timezone.utc)
-        self.agent.clear_price_cache()
+        # Don't clear the in-memory quote cache out from under an in-flight
+        # background scan; risk checks use for_risk quotes that bypass it anyway.
+        if self._scan_future is None:
+            self.agent.clear_price_cache()
         broker = self.agent.make_broker()
         account = broker.get_account()
 
@@ -161,58 +174,82 @@ class AlwaysOnAgent:
                             100 * dd, 100 * dd_limit)
 
         self._ensure_stops_for_held(broker, account)
+
+        # 1) risk management on open positions — EVERY tick, never blocked by a scan
+        risk_actions = self._manage_risk(broker, account, execute)
         pending = set(self.state.pending_risk.keys())
 
-        # 1) risk management on open positions — every tick
-        risk_actions = self._manage_risk(broker, account, execute)
-        pending |= set(self.state.pending_risk.keys())
+        # 2) harvest a finished background scan
+        if self._scan_future is not None and self._scan_future.done():
+            try:
+                self._pending_scan = self._scan_future.result()
+            except Exception as e:
+                log.error("background scan failed: %s", e, exc_info=True)
+                self._pending_scan = None
+            self._scan_future = None
 
-        # 2) scheduled rebalance (buys blocked while halted; sells always allowed)
-        if self._due_for_rebalance(now):
-            if risk_actions:
-                log.warning("skipping rebalance this tick after protective action(s): %s",
-                            sorted(risk_actions))
-                self.state.save()
-                return
-            log.info("rebalance due — scanning (allow_buys=%s)", not halted)
-            run = self.agent.run(
-                execute=execute,
-                allow_buys=not halted,
-                exclude_tickers=pending,
-            )
-            for tp in run.scan.targets:
-                if tp.stop_price:
-                    self.state.stops[tp.ticker] = tp.stop_price
-                if tp.take_profit:
-                    self.state.take_profits[tp.ticker] = tp.take_profit
-                if tp.ticker not in self.state.high_water:
-                    px = self.agent.price_fn(tp.ticker) or 0.0
-                    if px:
-                        self.state.high_water[tp.ticker] = px
-            held_account = run.post_account
-            if held_account is None:
-                try:
-                    held_account = self.agent.make_broker().get_account()
-                except Exception as e:
-                    log.warning("post-rebalance account refresh failed: %s", e)
-            if held_account is not None:
-                held = {p.ticker for p in held_account.positions}
-            else:
-                held = {p.ticker for p in account.positions}
-            self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
-            self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
-            self.state.high_water = {k: v for k, v in self.state.high_water.items() if k in held}
-            # Prune pending-risk flags for names no longer held, so a name that left
-            # the book another way (manual sale, unrecognized fill status) is not
-            # permanently excluded from future re-entry.
-            self.state.pending_risk = {k: v for k, v in self.state.pending_risk.items() if k in held}
+        # 3) execute a harvested scan — but not on the same tick as a protective
+        #    sell (let it settle first; the finished scan waits for a clean tick).
+        if self._pending_scan is not None and not risk_actions:
+            scan = self._pending_scan
+            self._pending_scan = None
+            run = self.agent.reconcile_and_execute(
+                scan, execute=execute, allow_buys=not halted, exclude_tickers=pending,
+                broker=broker, account=account)
+            self._apply_rebalance_result(run, account)
+        # 4) otherwise, kick off a new scan when due (and none is in flight/pending)
+        elif (self._due_for_rebalance(now) and self._scan_future is None
+              and self._pending_scan is None and not risk_actions):
+            equity = account.equity if (account.equity and account.equity > 0) \
+                else self.agent.default_equity()
+            held = [p.ticker for p in account.positions]
+            log.info("rebalance due — scanning in background (allow_buys=%s)", not halted)
+            self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held)
+            # Anchor cadence to scan START so a slow scan doesn't compress the interval.
             self.state.last_rebalance = now.isoformat()
-            log.info("rebalanced: %d targets, %d orders (%s)",
-                     len(run.scan.targets), len(run.orders), run.mode)
         else:
             log.info("monitoring %d positions (next rebalance pending)", len(account.positions))
 
         self.state.save()
+
+    def _mode(self) -> str:
+        return "live" if self.cfg.live_trading_armed else "paper"
+
+    def _safe_scan(self, equity: float, held: list[str]):
+        """Background worker: the slow scan only (data + AI). No broker, no state."""
+        return self.agent.scan(equity=equity, include_tickers=held)
+
+    def _apply_rebalance_result(self, run, account) -> None:
+        for tp in run.scan.targets:
+            if tp.stop_price:
+                self.state.stops[tp.ticker] = tp.stop_price
+            if tp.take_profit:
+                self.state.take_profits[tp.ticker] = tp.take_profit
+            if tp.ticker not in self.state.high_water:
+                px = self.agent.price_fn(tp.ticker) or 0.0
+                if px:
+                    self.state.high_water[tp.ticker] = px
+        held_account = run.post_account
+        if held_account is None:
+            try:
+                held_account = self.agent.make_broker().get_account()
+            except Exception as e:
+                log.warning("post-rebalance account refresh failed: %s", e)
+        if held_account is not None:
+            held = {p.ticker for p in held_account.positions}
+        else:
+            held = {p.ticker for p in account.positions}
+        self.state.stops = {k: v for k, v in self.state.stops.items() if k in held}
+        self.state.take_profits = {k: v for k, v in self.state.take_profits.items() if k in held}
+        self.state.high_water = {k: v for k, v in self.state.high_water.items() if k in held}
+        # Prune pending-risk flags for names no longer held, so a name that left
+        # the book another way (manual sale, unrecognized fill status) is not
+        # permanently excluded from future re-entry.
+        self.state.pending_risk = {k: v for k, v in self.state.pending_risk.items() if k in held}
+        # Journal the executed orders with their decision context (self-improving log).
+        self.journal.record_rebalance(run, held_account or account, self.agent.price_fn)
+        log.info("rebalanced: %d targets, %d orders (%s)",
+                 len(run.scan.targets), len(run.orders), run.mode)
 
     def _manage_risk(self, broker, account, execute: bool) -> set[str]:
         """Manage stops/TPs. Returns tickers where a protective sell was confirmed."""
@@ -246,6 +283,9 @@ class AlwaysOnAgent:
                     self.state.high_water.pop(tk, None)
                     self.state.pending_risk.pop(tk, None)
                     triggered.add(tk)
+                    self.journal.record_order(ticker=tk, side="sell", qty=pos.quantity,
+                                              price=px, reason=f"stop {stop}",
+                                              status="submitted", mode=self._mode())
                 elif not execute:
                     log.info("STOP preview for %s — keeping stop state unchanged", tk)
                 else:
@@ -261,6 +301,9 @@ class AlwaysOnAgent:
                     self.state.take_profits.pop(tk, None)
                     self.state.pending_risk.pop(tk, None)
                     triggered.add(tk)
+                    self.journal.record_order(ticker=tk, side="sell", qty=pos.quantity * 0.5,
+                                              price=px, reason=f"take-profit {tp}",
+                                              status="submitted", mode=self._mode())
                 elif not execute:
                     log.info("TP preview for %s — keeping TP state unchanged", tk)
                 else:
@@ -306,3 +349,5 @@ class AlwaysOnAgent:
         except ProcessLockError as e:
             log.error("%s", e)
             raise
+        finally:
+            self._scan_pool.shutdown(wait=False, cancel_futures=True)

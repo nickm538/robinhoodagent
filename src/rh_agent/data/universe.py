@@ -121,6 +121,28 @@ def build_universe(md: MarketData, cfg: Config, raw: list[str] | None = None) ->
     blacklist = set(u.get("blacklist", []))
     excl_sectors = set(u.get("exclude_sectors", []))
     tickers = raw if raw is not None else md.list_universe()
+
+    # Seed today's market movers (top gainers / most-active) ahead of the base
+    # list so the intraday radar actually has live runners to hunt — otherwise it
+    # only ever sees the static liquid set and falls back every cycle.
+    intraday_cfg = u.get("intraday", {}) or {}
+    if (raw is None and intraday_cfg.get("enabled", False)
+            and intraday_cfg.get("use_movers_feed", True)):
+        try:
+            movers = md.get_market_movers(int(intraday_cfg.get("movers_limit", 60))) or []
+        except Exception as e:
+            log.debug("movers feed unavailable: %s", e)
+            movers = []
+        if movers:
+            seen: set[str] = set()
+            merged: list[str] = []
+            for t in list(movers) + list(tickers or []):
+                if t and t not in seen:
+                    seen.add(t)
+                    merged.append(t)
+            tickers = merged
+            log.info("seeded %d market movers into the scan universe", len(movers))
+
     if not tickers:
         log.warning("empty raw universe; provide a snapshot or enable a universe provider")
         return []

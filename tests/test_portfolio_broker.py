@@ -278,6 +278,8 @@ def _daemon_for_risk_test(price: float):
     d.agent = _DummyAgent({"AAA": price})
     d.state = daemon.DaemonState(stops={"AAA": 95.0}, take_profits={},
                                  high_water={"AAA": price}, pending_risk={})
+    d.journal = daemon.Journal(cfg)
+    d.journal.enabled = False     # no journal-file writes in unit tests
     return d
 
 
@@ -344,22 +346,22 @@ def test_daemon_manage_risk_clears_stop_on_confirmed_order():
     assert "AAA" not in d.state.stops
 
 
-def test_daemon_rebalance_prunes_pending_risk_for_unheld(tmp_path, monkeypatch):
-    """A name stuck in pending_risk but no longer held must be released on
-    rebalance, so it is not permanently excluded from re-entry."""
+def test_daemon_rebalance_prunes_pending_risk_for_unheld():
+    """A name stuck in pending_risk but no longer held must be released when a
+    rebalance result is applied, so it is not permanently excluded from re-entry."""
     import rh_agent.daemon as daemon
     from rh_agent.agent import RunResult, ScanResult
     from rh_agent.regime import RegimeResult
-    monkeypatch.setattr(daemon, "STATE", tmp_path / "daemon_state.json")
 
     d = daemon.AlwaysOnAgent.__new__(daemon.AlwaysOnAgent)
     d.cfg = load_config()
-    d.d = {}
+    d.agent = _DummyAgent({"AAA": 100.0})
+    d.journal = daemon.Journal(d.cfg)
+    d.journal.enabled = False
     # Only AAA is actually held; GONE left the book another way but lingers in state.
     held_acct = Account(equity=1_000.0, cash=0.0, buying_power=0.0, source="paper",
                         positions=[Position("AAA", 1.0, 100.0, current_price=100.0)])
     d.state = daemon.DaemonState(
-        last_rebalance="", day_start_equity=1_000.0,
         stops={"AAA": 90.0, "GONE": 50.0}, take_profits={},
         high_water={"AAA": 100.0, "GONE": 60.0},
         pending_risk={"AAA": "stop", "GONE": "stop"},
@@ -371,28 +373,7 @@ def test_daemon_rebalance_prunes_pending_risk_for_unheld(tmp_path, monkeypatch):
     run = RunResult(scan=empty_scan, account=held_acct, post_account=held_acct,
                     orders=[], fills=[], executed=False, mode="paper")
 
-    class _Brk:
-        supports_live = False
-        def get_account(self):
-            return held_acct
-
-    class _Agent:
-        def clear_price_cache(self):
-            pass
-        def make_broker(self):
-            return _Brk()
-        def run(self, **kw):
-            return run
-        def price_fn(self, t, for_risk=False):
-            return 100.0
-
-    d.agent = _Agent()
-    # Isolate the rebalance pruning path from risk/stop side effects.
-    d._manage_risk = lambda *a, **k: set()
-    d._ensure_stops_for_held = lambda *a, **k: None
-    d._due_for_rebalance = lambda now: True
-
-    d.tick(execute=False)
+    d._apply_rebalance_result(run, held_acct)
 
     # The fix: unheld GONE is released from pending_risk (and the other state maps).
     assert "GONE" not in d.state.pending_risk
@@ -400,6 +381,72 @@ def test_daemon_rebalance_prunes_pending_risk_for_unheld(tmp_path, monkeypatch):
     assert "GONE" not in d.state.high_water
     # Still-held AAA is retained.
     assert "AAA" in d.state.pending_risk
+
+
+def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
+    """The slow scan runs off-thread (kicked one tick, executed on a later tick),
+    so risk management is never blocked waiting on it."""
+    import rh_agent.daemon as daemon
+    from concurrent.futures import ThreadPoolExecutor
+    from rh_agent.agent import RunResult, ScanResult
+    from rh_agent.regime import RegimeResult
+    monkeypatch.setattr(daemon, "STATE", tmp_path / "s.json")
+
+    cfg = load_config()
+    d = daemon.AlwaysOnAgent.__new__(daemon.AlwaysOnAgent)
+    d.cfg = cfg
+    d._scan_pool = ThreadPoolExecutor(max_workers=1)
+    d._scan_future = None
+    d._pending_scan = None
+    d.journal = daemon.Journal(cfg)
+    d.journal.enabled = False
+    d.state = daemon.DaemonState(stops={}, take_profits={}, high_water={}, pending_risk={})
+
+    acct = Account(equity=1000.0, cash=1000.0, buying_power=1000.0, source="paper", positions=[])
+    scan_result = ScanResult(regime=RegimeResult("neutral", {}, 0.0), verdicts=[], eligible=[],
+                             targets=[], equity=1000.0, universe_size=0, scored_size=0)
+    reconciled = RunResult(scan=scan_result, account=acct, post_account=acct,
+                           orders=[], fills=[], executed=False, mode="paper")
+    events = []
+
+    class _Brk:
+        supports_live = False
+        def get_account(self):
+            return acct
+
+    class _Agent:
+        def clear_price_cache(self):
+            pass
+        def make_broker(self):
+            return _Brk()
+        def default_equity(self):
+            return 1000.0
+        def scan(self, equity, include_tickers=None):
+            events.append("scan")
+            return scan_result
+        def reconcile_and_execute(self, scan, **kw):
+            events.append("reconcile")
+            return reconciled
+        def price_fn(self, t, for_risk=False):
+            return 100.0
+
+    d.agent = _Agent()
+    d._ensure_stops_for_held = lambda *a, **k: None
+    d._manage_risk = lambda *a, **k: set()
+    d._due_for_rebalance = lambda now: True
+
+    # Tick 1: kicks the background scan, does NOT reconcile synchronously.
+    d.tick(execute=False)
+    assert d._scan_future is not None
+    assert "reconcile" not in events
+    d._scan_future.result(timeout=5)        # let the worker finish
+
+    # Tick 2: harvests the finished scan and reconciles on the main thread.
+    d._due_for_rebalance = lambda now: False
+    d.tick(execute=False)
+    assert "scan" in events and "reconcile" in events
+    assert d._scan_future is None and d._pending_scan is None
+    d._scan_pool.shutdown(wait=False)
 
 
 def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):

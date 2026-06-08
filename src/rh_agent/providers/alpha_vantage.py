@@ -216,6 +216,23 @@ class AlphaVantageProvider(DataProvider):
         return prices_to_df(recs)
 
     # -------- universe --------
+    def get_market_movers(self, limit: int = 60) -> list[str]:
+        """Top gainers + most-active from TOP_GAINERS_LOSERS (today's runners)."""
+        if OFFLINE:
+            raise ProviderUnsupported
+        d = self._q("movers", 5, {"function": "TOP_GAINERS_LOSERS"})  # short TTL — intraday
+        if not isinstance(d, dict):
+            raise ProviderUnsupported
+        out: list[str] = []
+        for sect in ("top_gainers", "most_actively_traded"):
+            for row in (d.get(sect) or []):
+                t = row.get("ticker") if isinstance(row, dict) else None
+                if t and "-" not in t and t not in out:
+                    out.append(t)
+        if not out:
+            raise ProviderUnsupported
+        return out[:limit]
+
     def list_universe(self) -> list[str]:
         if OFFLINE:
             raise ProviderUnsupported

@@ -241,8 +241,24 @@ class MboumProvider(DataProvider):
         return out
 
     # ------------------------------------------------------------------ universe
-    def list_universe(self) -> list[str]:
-        d = _unwrap(self._cached("tickers", 1440, "/v2/markets/tickers",
-                                 {"type": "STOCKS", "page": 1}))
-        recs = d if isinstance(d, list) else []
-        return [r.get("symbol") for r in recs if isinstance(r, dict) and r.get("symbol")]
+    def list_universe(self, max_pages: int = 8) -> list[str]:
+        """Paginate the STOCKS listing (the API returns one page at a time).
+
+        Without this we only ever saw page 1 (~25 symbols), starving the whole
+        hunt down to a tiny arbitrary slice of the market.
+        """
+        out: list[str] = []
+        seen: set[str] = set()
+        for page in range(1, max_pages + 1):
+            d = _unwrap(self._cached("tickers", 1440, "/v2/markets/tickers",
+                                     {"type": "STOCKS", "page": page}))
+            recs = d if isinstance(d, list) else []
+            syms = [r.get("symbol") for r in recs
+                    if isinstance(r, dict) and r.get("symbol")]
+            if not syms:
+                break
+            for s in syms:
+                if s not in seen:
+                    seen.add(s)
+                    out.append(s)
+        return out
