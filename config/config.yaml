@@ -26,17 +26,19 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL: FinancialDatasets.AI is removed from every priority list — it
-  # was first for quote/prices/fundamentals and was by far the dominant API
-  # spend once the universe widened. MBOUM is primary (per mandate), TwelveData
-  # covers quote/price fallback, Alpha Vantage fills unique gaps (news, macro,
-  # movers). Re-add "financialdatasets" to any list below to use it again.
+  # COST CONTROL: FinancialDatasets.AI is removed from the high-frequency
+  # quote/prices/fundamentals lists where it was dominating API spend once the
+  # universe widened. It remains enabled for lower-frequency smart-money inputs:
+  # insider (720m cache) and institutional (1440m cache). MBOUM is primary (per
+  # mandate), TwelveData covers quote/price fallback, Alpha Vantage fills unique
+  # gaps (news, macro, movers). Re-add "financialdatasets" to any list below to
+  # use it again.
   fundamentals:   ["mboum", "alphavantage"]
   prices:         ["mboum", "twelvedata", "alphavantage"]
   quote:          ["mboum", "twelvedata", "alphavantage"]
   technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
-  insider:        ["financialdatasets", "mboum"]   # FD re-enabled: low-frequency (daily TTL,
-  institutional:  ["financialdatasets", "mboum"]   # deep names only) -> cheap, restores smart-money pillar
+  insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
+  institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
   news_sentiment: ["alphavantage", "mboum"]
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
