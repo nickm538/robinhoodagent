@@ -22,6 +22,13 @@ def _mode(path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
+def _skip_if_no_posix_mode_support(tmp_path):
+    probe = tmp_path / "probe" / "mode_check.json"
+    write_private(probe, "{}")
+    if _mode(probe) != 0o600 or _mode(probe.parent) != 0o700:
+        pytest.skip("Filesystem does not honor POSIX mode bits")
+
+
 def test_write_private_creates_owner_only_file(tmp_path):
     p = tmp_path / "nested" / "secret.json"
     write_private(p, '{"token": "x"}')
@@ -52,15 +59,14 @@ def test_oauth_token_file_is_private(tmp_path):
     """OAuth tokens are the most sensitive on-disk credential — 0600 from creation."""
     if os.name != "posix":
         pytest.skip("POSIX file permissions not enforced on this platform")
+    _skip_if_no_posix_mode_support(tmp_path)
 
-    class _Tokens:
-        def model_dump(self, *, exclude_none=True, mode="json"):
+    class MockOAuthTokens:
+        def model_dump(self, **_kwargs):
             return {"access_token": "secret", "token_type": "bearer"}
 
     p = tmp_path / "state" / "robinhood_oauth.json"
-    asyncio.run(FileTokenStorage(p).set_tokens(_Tokens()))
-    if _mode(p) != 0o600 or _mode(p.parent) != 0o700:
-        pytest.xfail("Filesystem does not honor POSIX mode bits")
+    asyncio.run(FileTokenStorage(p).set_tokens(MockOAuthTokens()))
     assert _mode(p) == 0o600
     assert _mode(p.parent) == 0o700
     assert json.loads(p.read_text())["tokens"]["access_token"] == "secret"
