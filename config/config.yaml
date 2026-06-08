@@ -185,7 +185,9 @@ normalize:
   winsorize_sigma: 3.0           # clip outliers at +/- 3 sigma before scoring
   min_factor_coverage: 0.5       # a factor needs >=50% of names to count, else neutralized
   # Require multi-pillar confirmation to make the buy list (kills single-signal noise).
-  min_pillars_passing: 2         # >=2 of 5 pillars confirm — matches live coverage (momentum + quant)
+  min_pillars_passing: 1         # HUNTER: 1 strong pillar qualifies — lets it buy best-scorers and
+                                 # snipe momentum runners (which light up only one pillar). Set 2 (or
+                                 # RH_MIN_PILLARS=2) to require multi-pillar confirmation / less noise.
                                  # reliably have data; deep pillars are sparse. 3 starved the book to 1 name.
   pillar_pass_threshold: 52.0    # a pillar "passes" a bit easier -> more names clear multi-pillar gate
 
@@ -237,7 +239,9 @@ portfolio:
     take_profit_atr_mult: 6.0
     hard_stop_pct: 0.18          # absolute -18% disaster stop floor
     max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day (sells still run)
-    per_trade_risk_pct: 0.01     # cap position weight so loss at stop ~1% of equity
+    per_trade_risk_pct: 0.02     # DEPLOY: ~2% equity risk per name at stop. At 0.01, high-ATR names
+                                 # were capped to ~6-8% weight -> ~86% idle cash. 0.02 lets the book
+                                 # actually reach the regime exposure target (stops still bound losses).
     block_stale_quote: true      # never open/add from stale live quote data
     block_ai_caution: true       # exclude names flagged bearish by Claude overlay
     block_earnings_within_days: 2  # skip new entries within N days of earnings
