@@ -8,6 +8,7 @@ import stat
 
 import pytest
 
+from rh_agent.broker.oauth import FileTokenStorage
 from rh_agent.broker.paper import PaperBroker
 from rh_agent.config import write_private
 from rh_agent.models import Order
@@ -44,6 +45,15 @@ def test_paper_account_state_is_private(tmp_path):
     assert _mode(state) == 0o600
     # sanity: it still round-trips as valid JSON account state
     assert "positions" in json.loads(state.read_text())
+
+
+def test_oauth_token_file_is_private(tmp_path):
+    """OAuth tokens are the most sensitive on-disk credential — 0600 from creation."""
+    p = tmp_path / "state" / "robinhood_oauth.json"
+    FileTokenStorage(p)._save({"tokens": {"access_token": "secret", "token_type": "bearer"}})
+    assert _mode(p) == 0o600
+    assert _mode(p.parent) == 0o700
+    assert json.loads(p.read_text())["tokens"]["access_token"] == "secret"
 
 
 def test_daemon_state_is_private(tmp_path, monkeypatch):
