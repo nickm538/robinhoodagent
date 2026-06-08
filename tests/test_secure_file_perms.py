@@ -2,6 +2,7 @@
 (addresses the 'Insecure File Creation Permissions' review finding)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import stat
@@ -49,8 +50,17 @@ def test_paper_account_state_is_private(tmp_path):
 
 def test_oauth_token_file_is_private(tmp_path):
     """OAuth tokens are the most sensitive on-disk credential — 0600 from creation."""
+    if os.name != "posix":
+        pytest.skip("POSIX file permissions not enforced on this platform")
+
+    class _Tokens:
+        def model_dump(self, *, exclude_none=True, mode="json"):
+            return {"access_token": "secret", "token_type": "bearer"}
+
     p = tmp_path / "state" / "robinhood_oauth.json"
-    FileTokenStorage(p)._save({"tokens": {"access_token": "secret", "token_type": "bearer"}})
+    asyncio.run(FileTokenStorage(p).set_tokens(_Tokens()))
+    if _mode(p) != 0o600 or _mode(p.parent) != 0o700:
+        pytest.xfail("Filesystem does not honor POSIX mode bits")
     assert _mode(p) == 0o600
     assert _mode(p.parent) == 0o700
     assert json.loads(p.read_text())["tokens"]["access_token"] == "secret"
