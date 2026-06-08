@@ -26,7 +26,10 @@ def test_light_guards_zero_historical_close():
         def get_company(self, t):
             return {"market_cap": 1e10, "sector": "Technology"}
 
-    c = U._light(FakeMD(), "AAA")
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        c = U._light(FakeMD(), "AAA")
     assert c is not None
     assert math.isfinite(c.mom_63)
     assert c.mom_63 == 0.0
