@@ -73,17 +73,6 @@ class TickerData:
 
 
 @dataclass
-class AnalystVerdict:
-    """One persona's read on a ticker."""
-
-    name: str
-    score: float                      # 0..100
-    factor_scores: dict = field(default_factory=dict)
-    rationale: str = ""
-    coverage: float = 1.0             # fraction of factors that had data
-
-
-@dataclass
 class Verdict:
     """The Chief PM's blended decision for a ticker."""
 

@@ -119,10 +119,6 @@ class Config:
             and os.getenv("LIVE_TRADING_CONFIRM", "") == "I_UNDERSTAND_REAL_MONEY"
         )
 
-    def available_providers(self) -> dict:
-        """Which data providers actually have keys present."""
-        return {p: bool(self.api_key(p)) for p in _KEY_ENV}
-
 
 def load_config(path: str | Path | None = None) -> Config:
     p = Path(path) if path else DEFAULT_CONFIG
