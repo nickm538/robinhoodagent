@@ -83,7 +83,14 @@ class DaemonState:
 
     def save(self) -> None:
         _harden_state_path(STATE)
-        STATE.write_text(json.dumps(self.__dict__, indent=2, default=str))
+        payload = json.dumps(self.__dict__, indent=2, default=str)
+        import os
+        with STATE.open(
+            "w",
+            encoding="utf-8",
+            opener=lambda p, flags: os.open(p, flags, 0o600),
+        ) as fh:
+            fh.write(payload)
         try:
             STATE.chmod(0o600)
         except OSError:
