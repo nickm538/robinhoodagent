@@ -141,7 +141,7 @@ python -m rh_agent.cli loop --execute
 
 The loop runs **non-stop**: every cycle (default **5 min** poll, market-hours aware) it
 manages risk on open positions (ATR trailing/hard stops, take-profits), and on the
-configured cadence (**weekly** by default) it re-scans, rebuilds the book, and
+configured cadence (**hourly** by default) it re-scans, rebuilds the book, and
 executes. A **daily-drawdown circuit breaker** suspends new buying after a -6%
 day (de-risking sells still run). It is crash-resistant — an error in one cycle is logged and the loop keeps
 going.

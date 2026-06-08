@@ -1,6 +1,8 @@
 """Tests for portfolio caps and the paper broker."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -277,6 +279,41 @@ def _daemon_for_risk_test(price: float):
     d.state = daemon.DaemonState(stops={"AAA": 95.0}, take_profits={},
                                  high_water={"AAA": price}, pending_risk={})
     return d
+
+
+def _daemon_for_cadence_test(schedule: str | None):
+    import rh_agent.daemon as daemon
+    cfg = load_config()
+    if schedule is None:
+        cfg.raw["portfolio"]["rebalance"].pop("schedule", None)
+    else:
+        cfg.raw["portfolio"]["rebalance"]["schedule"] = schedule
+    d = daemon.AlwaysOnAgent.__new__(daemon.AlwaysOnAgent)
+    d.cfg = cfg
+    d.state = daemon.DaemonState(stops={}, take_profits={}, high_water={}, pending_risk={})
+    return d
+
+
+def test_daemon_rebalance_cadence_defaults_to_hourly():
+    now = datetime(2026, 6, 8, 15, 0, tzinfo=timezone.utc)
+    d = _daemon_for_cadence_test(schedule=None)
+
+    d.state.last_rebalance = (now - timedelta(minutes=59)).isoformat()
+    assert d._due_for_rebalance(now) is False
+
+    d.state.last_rebalance = (now - timedelta(hours=1)).isoformat()
+    assert d._due_for_rebalance(now) is True
+
+
+def test_daemon_rebalance_cadence_supports_hourly():
+    now = datetime(2026, 6, 8, 15, 0, tzinfo=timezone.utc)
+    d = _daemon_for_cadence_test(schedule="hourly")
+
+    d.state.last_rebalance = (now - timedelta(minutes=59)).isoformat()
+    assert d._due_for_rebalance(now) is False
+
+    d.state.last_rebalance = (now - timedelta(hours=1, seconds=1)).isoformat()
+    assert d._due_for_rebalance(now) is True
 
 
 def test_daemon_manage_risk_keeps_stop_in_dry_run():

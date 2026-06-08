@@ -4,7 +4,7 @@ Runs hands-off and non-stop. Each cycle it:
   1. refreshes the account from the broker;
   2. manages risk on open positions every tick (trailing/hard stops, take-profits)
      — this happens intraday, not just at rebalance;
-  3. on the configured cadence (e.g. weekly), re-scans the universe, rebuilds the
+  3. on the configured cadence (hourly by default), re-scans the universe, rebuilds the
      target book, and reconciles/executes orders;
   4. enforces a daily-drawdown circuit breaker that suspends new buying (sells still run);
   5. persists state and sleeps until the next tick.
@@ -103,11 +103,13 @@ class AlwaysOnAgent:
         except ValueError:
             return True
         elapsed = (now - last).total_seconds()
-        sched = self.cfg.get("portfolio.rebalance.schedule", "weekly")
+        sched = self.cfg.get("portfolio.rebalance.schedule", "hourly")
+        if sched == "hourly":
+            return elapsed >= 3600
         if sched == "intraday":
             hours = float(self.cfg.get("portfolio.rebalance.intraday_hours", 2))
             return elapsed >= hours * 3600
-        days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(sched, 7)
+        days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(sched, 1 / 24)
         return elapsed >= days * 86400
 
     def _ensure_stops_for_held(self, broker, account) -> None:
