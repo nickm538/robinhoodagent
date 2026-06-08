@@ -101,7 +101,12 @@ class AlwaysOnAgent:
         # and state writes happen on the main thread when we consume its result.
         self._scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rh-scan")
         self._scan_future = None      # in-flight scan, or None
+        self._scan_started_at = None  # when the in-flight scan was kicked (watchdog)
         self._pending_scan = None     # finished scan awaiting a safe tick to execute
+        # Watchdog: a scan that never returns would otherwise pin _scan_future and
+        # silently halt all hunting until a manual restart. Abandon one that runs
+        # longer than this and let a fresh scan start next cycle.
+        self._scan_timeout = float(self.cfg.get("daemon.scan_timeout_seconds", 1800))
         self.journal = Journal(self.cfg)
 
     # -- cadence --
@@ -179,14 +184,27 @@ class AlwaysOnAgent:
         risk_actions = self._manage_risk(broker, account, execute)
         pending = set(self.state.pending_risk.keys())
 
-        # 2) harvest a finished background scan
-        if self._scan_future is not None and self._scan_future.done():
-            try:
-                self._pending_scan = self._scan_future.result()
-            except Exception as e:
-                log.error("background scan failed: %s", e, exc_info=True)
+        # 2) harvest a finished background scan, or abandon a stuck one (watchdog)
+        if self._scan_future is not None:
+            if self._scan_future.done():
+                try:
+                    self._pending_scan = self._scan_future.result()
+                except Exception as e:
+                    log.error("background scan failed: %s", e, exc_info=True)
+                    self._pending_scan = None
+                self._scan_future = None
+                self._scan_started_at = None
+            elif (self._scan_started_at is not None
+                  and (now - self._scan_started_at).total_seconds() > self._scan_timeout):
+                log.error("background scan exceeded %.0fs without finishing — abandoning it; "
+                          "a fresh scan will start next cycle", self._scan_timeout)
+                # A stuck worker thread can't be force-killed; retire the whole pool
+                # (the orphan dies when its HTTP calls time out) and start a clean one.
+                self._scan_pool.shutdown(wait=False, cancel_futures=True)
+                self._scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rh-scan")
+                self._scan_future = None
+                self._scan_started_at = None
                 self._pending_scan = None
-            self._scan_future = None
 
         # 3) execute a harvested scan — but not on the same tick as a protective
         #    sell (let it settle first; the finished scan waits for a clean tick).
@@ -209,6 +227,7 @@ class AlwaysOnAgent:
             held = [p.ticker for p in account.positions]
             log.info("rebalance due — scanning in background (allow_buys=%s)", not halted)
             self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held)
+            self._scan_started_at = now
             # Anchor cadence to scan START so a slow scan doesn't compress the interval.
             self.state.last_rebalance = now.isoformat()
         else:

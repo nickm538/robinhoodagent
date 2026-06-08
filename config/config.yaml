@@ -276,6 +276,9 @@ daemon:
   poll_seconds: 60             # risk/stop checks every minute; rebalance gated by cadence above
   trade_only_when_open: true   # only trade during US market hours
   manage_stops_every_tick: true
+  scan_timeout_seconds: 1800   # watchdog: abandon a background scan that runs longer than
+                               # this (a true hang) so hunting can never silently stall.
+                               # Normal scans take ~10-15 min; 30 min only trips on a stall.
 
 # ----------------------------------------------------------------------
 # JOURNAL / MEMORY  — self-improving log. Records every executed order with its
