@@ -45,13 +45,28 @@ def _account(ticker: str) -> Account:
 def test_hold_discipline_keeps_held_name_above_exit_bar():
     agent = _agent()
     acct = _account("HEALTHY")
-    scan = _scan([Verdict("HEALTHY", 52.0, {}, pillars_passing=1)])
+    # Comfortably above the (tightened) exit bar: composite >= 47 AND >= 2 pillars.
+    scan = _scan([Verdict("HEALTHY", 52.0, {}, pillars_passing=2)])
 
     scan = agent._apply_hold_discipline(scan, acct, acct.equity)
     orders = build_orders(acct, scan.targets, agent.cfg, agent.price_fn)
 
     assert [t.ticker for t in scan.targets] == ["HEALTHY"]
     assert orders == []
+
+
+def test_hold_discipline_rotates_out_held_name_that_lost_pillar_support():
+    # A held name still above the score floor but down to a single pillar is now
+    # rotated out (aggressive exit: must keep >= 2 pillars).
+    agent = _agent()
+    acct = _account("WEAK")
+    scan = _scan([Verdict("WEAK", 52.0, {}, pillars_passing=1)])
+
+    scan = agent._apply_hold_discipline(scan, acct, acct.equity)
+    orders = build_orders(acct, scan.targets, agent.cfg, agent.price_fn)
+
+    assert scan.targets == []
+    assert len(orders) == 1 and orders[0].side == "sell" and orders[0].ticker == "WEAK"
 
 
 def test_hold_discipline_allows_exit_on_real_deterioration():
