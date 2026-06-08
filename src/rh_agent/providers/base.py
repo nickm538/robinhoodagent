@@ -132,6 +132,10 @@ class DataProvider:
     def list_universe(self) -> list[str]:
         raise ProviderUnsupported
 
+    def get_market_movers(self, limit: int = 60) -> list[str]:
+        """Today's top gainers / most-active symbols (intraday discovery)."""
+        raise ProviderUnsupported
+
     # -- per ticker sections --
     def get_company(self, ticker: str) -> dict:
         raise ProviderUnsupported

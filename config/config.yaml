@@ -41,6 +41,9 @@ providers:
   options_flow:   ["alphavantage", "mboum"]
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
   macro:          ["alphavantage"]
+  # Universe/discovery: mboum paginated listing for the base set; Alpha Vantage
+  # TOP_GAINERS_LOSERS for the intraday movers feed (mboum has no movers endpoint).
+  universe:       ["mboum", "alphavantage"]
   cache_ttl_minutes:
     quote: 3
     prices: 720
@@ -86,6 +89,8 @@ universe:
     min_dollar_volume_today: 2000000
     min_breakout_pct: 0.01
     fallback_to_liquid_universe: true
+    use_movers_feed: true           # seed today's top gainers / most-active into the hunt
+    movers_limit: 60                # how many movers to pull from the feed each scan
   # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
   # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
   two_stage_threshold: 40         # above this many names, engage the funnel
@@ -264,6 +269,18 @@ daemon:
   poll_seconds: 60             # risk/stop checks every minute; rebalance gated by cadence above
   trade_only_when_open: true   # only trade during US market hours
   manage_stops_every_tick: true
+
+# ----------------------------------------------------------------------
+# JOURNAL / MEMORY  — self-improving log. Records every executed order with its
+# decision context, reconstructs realized P&L, feeds a bounded performance
+# summary into the AI overlay, and writes a human-readable memory.md digest.
+# It NEVER changes strategy parameters on its own.
+# ----------------------------------------------------------------------
+journal:
+  enabled: true
+  path: "state/journal.jsonl"
+  memory_md: "state/memory.md"
+  summary_trades: 20           # how many recent closed trades to surface
 
 # ----------------------------------------------------------------------
 backtest:

@@ -132,6 +132,21 @@ class MarketData:
                     pass
         return self.get_prices(symbol)
 
+    def get_market_movers(self, limit: int = 60) -> list[str]:
+        """Today's top gainers / most-active symbols from the first capable provider."""
+        for name in (self.priority.get("universe") or list(self.providers)):
+            p = self.providers.get(name)
+            fn = getattr(p, "get_market_movers", None) if p else None
+            if fn is None:
+                continue
+            try:
+                m = fn(limit)
+                if m:
+                    return list(m)
+            except Exception:
+                continue
+        return []
+
     def list_universe(self) -> list[str]:
         for name in (self.priority.get("universe") or list(self.providers)):
             p = self.providers.get(name)
