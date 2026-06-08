@@ -207,8 +207,8 @@ portfolio:
       - [10000, 10, 0.14, 0.40]
       - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "intraday"         # high-reactivity market-open re-rank/reconcile
-    intraday_hours: 0.25         # every 15 minutes; daemon poll still handles stops faster
+    schedule: "hourly"           # market-open re-rank/reconcile every hour
+    intraday_hours: 1            # used only when schedule: intraday
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per rebalance
     # Sell discipline for held names: stops/TPs still fire every tick, while
