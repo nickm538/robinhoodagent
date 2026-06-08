@@ -13,7 +13,7 @@ from .config import Config
 from .data.market_data import MarketData
 from .execution import build_orders
 from .logging_setup import get_logger
-from .models import Account, Order, TargetPosition, TickerData, Verdict
+from .models import Account, Order, Position, TargetPosition, TickerData, Verdict
 from .portfolio import PortfolioBuilder
 from .providers import build_providers, snapshot_priorities
 from .regime import RegimeResult, detect_regime
@@ -145,6 +145,13 @@ class TradingAgent:
             light = self._gather(names, deep=False)
             light_v = self.scorer.score(light, regime)
             names = [v.ticker for v in light_v[:top_k]]
+            if include_tickers:
+                seen = set(names)
+                for t in include_tickers:
+                    tk = t.strip().upper() if isinstance(t, str) else ""
+                    if tk and tk not in seen:
+                        names.append(tk)
+                        seen.add(tk)
 
         log.info("deep-scoring %d tickers", len(names))
         data = self._gather(names, deep=True)
@@ -248,6 +255,7 @@ class TradingAgent:
         equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
         held_tickers = [p.ticker for p in account.positions]
         scan = self.scan(equity=equity, tickers=tickers, include_tickers=held_tickers)
+        scan = self._apply_hold_discipline(scan, account, equity)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
                               allow_buys=allow_buys, exclude_tickers=exclude_tickers)
 
@@ -269,6 +277,103 @@ class TradingAgent:
         return RunResult(scan=scan, account=account, post_account=post_account,
                          orders=orders, fills=fills,
                          executed=execute, mode=mode)
+
+    def _apply_hold_discipline(self, scan: ScanResult, account: Account, equity: float) -> ScanResult:
+        """Use a lower exit bar than the buy bar so intraday scans do not churn.
+
+        Hard risk exits still happen in the daemon every tick. This layer only
+        decides whether a held name missing from the latest target book should
+        be kept at its current weight or consciously sold on clear deterioration.
+        """
+        reb = self.cfg.get("portfolio.rebalance", {}) or {}
+        if not reb.get("exit_hysteresis_enabled", True) or not account.positions:
+            return scan
+
+        target_map = {t.ticker: t for t in scan.targets}
+        verdict_map = {v.ticker: v for v in scan.verdicts}
+        td_map = scan.td_map or {}
+        targets = list(scan.targets)
+        hold_missing = bool(reb.get("hold_on_missing_data", True))
+
+        for pos in account.positions:
+            tk = pos.ticker
+            if tk in target_map:
+                continue
+            verdict = verdict_map.get(tk)
+            if verdict is None:
+                if hold_missing:
+                    target = self._held_target(pos, None, td_map.get(tk), equity,
+                                               "hold: missing scan data")
+                    if target:
+                        targets.append(target)
+                continue
+            if self._should_exit_held(verdict):
+                log.info("held %s failed exit discipline — allowing rebalance sell", tk)
+                continue
+            target = self._held_target(pos, verdict, td_map.get(tk), equity,
+                                       "hold: exit hysteresis")
+            if target:
+                targets.append(target)
+
+        if len(targets) != len(scan.targets):
+            scan.targets = targets
+        return scan
+
+    def _should_exit_held(self, verdict: Verdict) -> bool:
+        reb = self.cfg.get("portfolio.rebalance", {}) or {}
+        exit_score = float(reb.get("exit_conviction_score", 45.0))
+        exit_pillars = int(float(reb.get("exit_min_pillars", 1)))
+        if verdict.composite < exit_score or verdict.pillars_passing < exit_pillars:
+            return True
+        if reb.get("exit_on_ai_caution", True) and "ai_caution" in verdict.flags:
+            return True
+        if reb.get("exit_on_high_volatility", False) and "high_volatility" in verdict.flags:
+            return True
+        earnings_days = int(float(reb.get("exit_on_earnings_within_days", 0) or 0))
+        if earnings_days > 0:
+            for fl in verdict.flags:
+                if fl.startswith("earnings_in_"):
+                    try:
+                        if int(fl.split("_")[-1].rstrip("d")) <= earnings_days:
+                            return True
+                    except ValueError:
+                        pass
+        return False
+
+    def _held_target(self, pos: Position, verdict: Verdict | None, td: TickerData | None,
+                     equity: float, reason: str) -> TargetPosition | None:
+        px = self.price_fn(pos.ticker) or pos.current_price or pos.avg_price
+        if not px or equity <= 0:
+            return None
+        dollars = pos.quantity * px
+        if dollars <= 0:
+            return None
+        rc = self.cfg.get("portfolio.risk_controls", {}) or {}
+        stop = take = None
+        sector = "Unknown"
+        if td is not None:
+            sector = td.sector
+            atr = td.technicals.get("atr")
+            try:
+                from .risk import atr_stop, take_profit
+                stop = atr_stop(px, atr, rc.get("stop_loss_atr_mult", 2.5),
+                                rc.get("hard_stop_pct", 0.18))
+                take = take_profit(px, atr, rc.get("take_profit_atr_mult", 6.0))
+            except Exception:
+                pass
+        score = round(verdict.composite, 1) if verdict else 0.0
+        rationale = f"{reason}; score={score}" if verdict else reason
+        return TargetPosition(
+            ticker=pos.ticker,
+            weight=round(dollars / equity, 4),
+            score=score,
+            shares=round(pos.quantity, 4),
+            dollars=round(dollars, 2),
+            stop_price=stop,
+            take_profit=take,
+            sector=sector,
+            rationale=rationale,
+        )
 
     # ---- backtest ----
     def backtest(self, limit: int | None = None, tickers: list[str] | None = None) -> "object":

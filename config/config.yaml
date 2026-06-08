@@ -211,6 +211,15 @@ portfolio:
     intraday_hours: 0.25         # every 15 minutes; daemon poll still handles stops faster
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per rebalance
+    # Sell discipline for held names: stops/TPs still fire every tick, while
+    # normal rebalances require real score/pillar deterioration before exiting.
+    exit_hysteresis_enabled: true
+    exit_conviction_score: 45.0
+    exit_min_pillars: 1
+    hold_on_missing_data: true
+    exit_on_ai_caution: true
+    exit_on_high_volatility: false
+    exit_on_earnings_within_days: 0
   risk_controls:
     stop_loss_atr_mult: 2.5      # initial + trailing stop at N× ATR(14) from high-water mark
     take_profit_atr_mult: 6.0
