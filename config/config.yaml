@@ -35,8 +35,8 @@ providers:
   prices:         ["mboum", "twelvedata", "alphavantage"]
   quote:          ["mboum", "twelvedata", "alphavantage"]
   technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
-  insider:        ["mboum"]
-  institutional:  ["mboum"]
+  insider:        ["financialdatasets", "mboum"]   # FD re-enabled: low-frequency (daily TTL,
+  institutional:  ["financialdatasets", "mboum"]   # deep names only) -> cheap, restores smart-money pillar
   news_sentiment: ["alphavantage", "mboum"]
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
@@ -73,7 +73,7 @@ universe:
     min_avg_dollar_volume: 2000000  # enough liquidity to trade without chasing microcaps
     min_avg_volume_shares: 100000
     min_history_days: 200         # need enough bars for 200dma / 12-1 momentum
-  scan_cap: 300                   # cap raw market scan per pass (cost + latency bound)
+  scan_cap: 400                   # cap raw market scan per pass (cost + latency bound)
   # Hard exclusions
   exclude_sectors: []             # e.g. ["Energy"] to sit out a sector
   blacklist: []                   # tickers to never trade
@@ -92,15 +92,15 @@ universe:
     min_breakout_pct: 0.01
     fallback_to_liquid_universe: true
     use_movers_feed: true           # seed today's top gainers / most-active into the hunt
-    movers_limit: 25                # how many movers to pull from the feed each scan
+    movers_limit: 35                # how many movers to pull from the feed each scan (more runners)
   # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
   # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
   two_stage_threshold: 40         # above this many names, engage the funnel
-  deep_top_k: 15                  # deep-score (+ AI) only the top N from the light pass
+  deep_top_k: 20                  # deep-score (+ AI) only the top N from the light pass
   # Coarse pre-screen (used in auto/full-universe mode).
   prescreen:
     enabled: true
-    max_candidates: 120           # deep-score at most this many survivors per run
+    max_candidates: 150           # deep-score at most this many survivors per run
 
 # ----------------------------------------------------------------------
 # THE PANEL OF FIVE  — five veteran-trader personas (an ensemble). Each
@@ -185,15 +185,15 @@ normalize:
   # Require multi-pillar confirmation to make the buy list (kills single-signal noise).
   min_pillars_passing: 2         # >=2 of 5 pillars confirm — matches live coverage (momentum + quant)
                                  # reliably have data; deep pillars are sparse. 3 starved the book to 1 name.
-  pillar_pass_threshold: 55.0
+  pillar_pass_threshold: 52.0    # a pillar "passes" a bit easier -> more names clear multi-pillar gate
 
 # ----------------------------------------------------------------------
 # PORTFOLIO CONSTRUCTION & RISK  — veteran discipline.
 # ----------------------------------------------------------------------
 portfolio:
   target_positions: 5            # ~$500 account -> 5 positions ~$85 each, comfortably above the $20 min
-  min_conviction_score: 55.0     # composite floor; the book is capped at the (auto-scaled)
-                                 # target_positions, so this just ensures enough names clear to fill it
+  min_conviction_score: 50.0     # composite floor (loosened for more deployment); the book is
+                                 # capped at the (auto-scaled) target_positions, so this just gates fill
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
   max_position_weight: 0.30      # small account: lets the top name tilt while keeping 5 names viable
@@ -214,18 +214,18 @@ portfolio:
       - [10000, 10, 0.14, 0.40]
       - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "hourly"           # COST: re-rank hourly. Stops/TPs are decoupled and
-                                 # still checked every 60s, so reactivity to risk is
-                                 # unchanged — only new-name hunting slows. Set to
-                                 # "intraday" + intraday_hours below for faster hunts.
-    intraday_hours: 0.25         # used only when schedule: intraday (every 15 min)
-    no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
-    max_turnover_per_rebalance: 0.30  # cap churn per rebalance
-    # Sell discipline for held names: stops/TPs still fire every tick, while
-    # normal rebalances require real score/pillar deterioration before exiting.
+    schedule: "intraday"         # AGGRESSIVE: re-rank every 30 min (cost middle-ground
+                                 # between 15-min firehose and hourly). Stops/TPs are
+                                 # decoupled and still checked every 60s regardless.
+    intraday_hours: 0.5          # 30 minutes between hunts
+    no_trade_band: 0.01          # act on drift >= 1% — more responsive rebalancing
+    max_turnover_per_rebalance: 0.40  # allow more rotation per rebalance
+    # Sell discipline: stops/TPs still fire every tick. Exit gates are now close to
+    # the entry gates so stale holds are actively ROTATED OUT for fresh conviction
+    # (a small buffer below entry avoids boundary flip-flop).
     exit_hysteresis_enabled: true
-    exit_conviction_score: 45.0
-    exit_min_pillars: 1
+    exit_conviction_score: 47.0  # sell a held name once composite drops below this
+    exit_min_pillars: 2          # held names must keep multi-pillar support, else rotate out
     hold_on_missing_data: true
     exit_on_ai_caution: true
     exit_on_high_volatility: false
@@ -255,7 +255,7 @@ ai_analyst:
   model: "claude-opus-4-8"      # max reasoning for catalyst/macro overlay (RH_AI_MODEL to override)
   effort: "medium"             # low | medium | high  (depth vs cost per cycle)
   weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
-  max_candidates: 10           # send the top N quant names to Claude (fewer -> cheaper per cycle)
+  max_candidates: 12           # send the top N quant names to Claude (middle-ground cost)
   max_tokens: 6000
 
 # ----------------------------------------------------------------------
