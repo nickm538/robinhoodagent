@@ -26,17 +26,19 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # FinancialDatasets.AI + Mboum are PRIMARY everywhere they are capable;
-  # Alpha Vantage / Twelve Data are fallbacks and fill unique gaps
-  # (news sentiment, macro, options positioning).
-  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
-  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
-  quote:          ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  # COST CONTROL: FinancialDatasets.AI is removed from every priority list — it
+  # was first for quote/prices/fundamentals and was by far the dominant API
+  # spend once the universe widened. MBOUM is primary (per mandate), TwelveData
+  # covers quote/price fallback, Alpha Vantage fills unique gaps (news, macro,
+  # movers). Re-add "financialdatasets" to any list below to use it again.
+  fundamentals:   ["mboum", "alphavantage"]
+  prices:         ["mboum", "twelvedata", "alphavantage"]
+  quote:          ["mboum", "twelvedata", "alphavantage"]
   technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
-  insider:        ["financialdatasets", "mboum", "alphavantage"]
-  institutional:  ["financialdatasets", "mboum", "alphavantage"]
+  insider:        ["mboum"]
+  institutional:  ["mboum"]
   news_sentiment: ["alphavantage", "mboum"]
-  analyst_ratings: ["mboum", "financialdatasets"]
+  analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
   options_flow:   ["alphavantage", "mboum"]
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
@@ -71,7 +73,7 @@ universe:
     min_avg_dollar_volume: 2000000  # enough liquidity to trade without chasing microcaps
     min_avg_volume_shares: 100000
     min_history_days: 200         # need enough bars for 200dma / 12-1 momentum
-  scan_cap: 1500                  # cap raw market scan per pass to keep latency bounded
+  scan_cap: 300                   # cap raw market scan per pass (cost + latency bound)
   # Hard exclusions
   exclude_sectors: []             # e.g. ["Energy"] to sit out a sector
   blacklist: []                   # tickers to never trade
@@ -90,15 +92,15 @@ universe:
     min_breakout_pct: 0.01
     fallback_to_liquid_universe: true
     use_movers_feed: true           # seed today's top gainers / most-active into the hunt
-    movers_limit: 60                # how many movers to pull from the feed each scan
+    movers_limit: 25                # how many movers to pull from the feed each scan
   # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
   # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
   two_stage_threshold: 40         # above this many names, engage the funnel
-  deep_top_k: 30                  # deep-score (+ AI) only the top N from the light pass
+  deep_top_k: 15                  # deep-score (+ AI) only the top N from the light pass
   # Coarse pre-screen (used in auto/full-universe mode).
   prescreen:
     enabled: true
-    max_candidates: 250           # deep-score at most this many survivors per run
+    max_candidates: 120           # deep-score at most this many survivors per run
 
 # ----------------------------------------------------------------------
 # THE PANEL OF FIVE  — five veteran-trader personas (an ensemble). Each
@@ -212,8 +214,11 @@ portfolio:
       - [10000, 10, 0.14, 0.40]
       - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "intraday"         # high-reactivity market-open re-rank/reconcile
-    intraday_hours: 0.25         # every 15 minutes; daemon poll still handles stops faster
+    schedule: "hourly"           # COST: re-rank hourly. Stops/TPs are decoupled and
+                                 # still checked every 60s, so reactivity to risk is
+                                 # unchanged — only new-name hunting slows. Set to
+                                 # "intraday" + intraday_hours below for faster hunts.
+    intraday_hours: 0.25         # used only when schedule: intraday (every 15 min)
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per rebalance
     # Sell discipline for held names: stops/TPs still fire every tick, while
@@ -250,7 +255,7 @@ ai_analyst:
   model: "claude-opus-4-8"      # max reasoning for catalyst/macro overlay (RH_AI_MODEL to override)
   effort: "medium"             # low | medium | high  (depth vs cost per cycle)
   weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
-  max_candidates: 20           # send the top N quant names to Claude (wider hunt -> review more)
+  max_candidates: 10           # send the top N quant names to Claude (fewer -> cheaper per cycle)
   max_tokens: 6000
 
 # ----------------------------------------------------------------------
