@@ -432,6 +432,14 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
         def price_fn(self, t, for_risk=False):
             return 100.0
 
+    class _ScanAgent:
+        def __init__(self, cfg, snapshot_path=None):
+            pass
+        def scan(self, equity, include_tickers=None):
+            events.append("scan")
+            return scan_result
+
+    monkeypatch.setattr(daemon, "TradingAgent", _ScanAgent)
     d.agent = _Agent()
     d._ensure_stops_for_held = lambda *a, **k: None
     d._manage_risk = lambda *a, **k: set()

@@ -89,6 +89,7 @@ def _valid_iso(s: str) -> bool:
 class AlwaysOnAgent:
     def __init__(self, cfg: Config, snapshot_path: str | None = None):
         self.cfg = cfg
+        self._snapshot_path = snapshot_path
         self.agent = TradingAgent(cfg, snapshot_path=snapshot_path)
         self.d = cfg.get("daemon", {}) or {}
         self.state = DaemonState.load()
@@ -97,8 +98,10 @@ class AlwaysOnAgent:
                 setattr(self.state, attr, {})
         # Background scan worker: the slow rebalance scan (data + AI, ~minutes)
         # runs here so stop/take-profit risk checks keep firing every tick on the
-        # main thread. The worker NEVER touches the broker — all order placement
-        # and state writes happen on the main thread when we consume its result.
+        # main thread. Each scan gets its own TradingAgent/data stack so an
+        # orphaned worker cannot race the main agent's caches/state. The worker
+        # NEVER touches the broker — all order placement and state writes happen
+        # on the main thread when we consume its result.
         self._scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rh-scan")
         self._scan_future = None      # in-flight scan, or None
         self._scan_started_at = None  # when the in-flight scan was kicked (watchdog)
@@ -211,9 +214,8 @@ class AlwaysOnAgent:
         if self._pending_scan is not None and not risk_actions:
             scan = self._pending_scan
             self._pending_scan = None
-            # The cache wasn't cleared at the top of this tick (a scan was in
-            # flight), so it still holds the background scan's now-stale quotes.
-            # Drop them so order sizing/reconciliation uses fresh prices.
+            # Drop cached quotes so order sizing/reconciliation uses a fresh
+            # main-thread price snapshot.
             self.agent.clear_price_cache()
             run = self.agent.reconcile_and_execute(
                 scan, execute=execute, allow_buys=not halted, exclude_tickers=pending,
@@ -240,7 +242,11 @@ class AlwaysOnAgent:
 
     def _safe_scan(self, equity: float, held: list[str]):
         """Background worker: the slow scan only (data + AI). No broker, no state."""
-        return self.agent.scan(equity=equity, include_tickers=held)
+        scan_agent = TradingAgent(
+            self.cfg,
+            snapshot_path=getattr(self, "_snapshot_path", None),
+        )
+        return scan_agent.scan(equity=equity, include_tickers=held)
 
     def _apply_rebalance_result(self, run, account) -> None:
         for tp in run.scan.targets:
