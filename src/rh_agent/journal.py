@@ -71,20 +71,20 @@ class Journal:
         """Append one executed order to the journal. Best-effort; never raises."""
         if not self.enabled:
             return
-        rec = {
-            "ts": utcnow().isoformat(),
-            "ticker": (ticker or "").upper(),
-            "side": (side or "").lower(),
-            "qty": round(float(qty), 6) if qty is not None else None,
-            "notional": round(float(notional), 2) if notional is not None else None,
-            "price": round(float(price), 4) if price is not None else None,
-            "reason": _short(reason, 120),
-            "status": status,
-            "mode": mode,
-        }
-        if context:
-            rec.update({k: v for k, v in context.items() if v is not None})
-        try:
+        try:  # journaling must NEVER break the trading loop — coercions included
+            rec = {
+                "ts": utcnow().isoformat(),
+                "ticker": (ticker or "").upper(),
+                "side": (side or "").lower(),
+                "qty": round(float(qty), 6) if qty is not None else None,
+                "notional": round(float(notional), 2) if notional is not None else None,
+                "price": round(float(price), 4) if price is not None else None,
+                "reason": _short(reason, 120),
+                "status": status,
+                "mode": mode,
+            }
+            if context:
+                rec.update({k: v for k, v in context.items() if v is not None})
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.path, "a") as fh:
                 fh.write(json.dumps(rec) + "\n")
@@ -92,7 +92,7 @@ class Journal:
                 self.path.chmod(0o600)
             except OSError:
                 pass
-        except Exception as e:  # journaling must never break the trading loop
+        except Exception as e:
             log.warning("journal write failed: %s", e)
 
     def record_rebalance(self, run, account, price_fn=None) -> None:
@@ -137,14 +137,17 @@ class Journal:
             return []
         out = []
         try:
-            for line in self.path.read_text().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except (json.JSONDecodeError, ValueError):
-                    continue
+            # Stream line-by-line so a long-lived journal never loads the whole
+            # file (raw string + split list) into memory at once.
+            with open(self.path) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        out.append(json.loads(line))
+                    except (json.JSONDecodeError, ValueError):
+                        continue
         except OSError as e:
             log.warning("journal read failed: %s", e)
         return out

@@ -193,6 +193,10 @@ class AlwaysOnAgent:
         if self._pending_scan is not None and not risk_actions:
             scan = self._pending_scan
             self._pending_scan = None
+            # The cache wasn't cleared at the top of this tick (a scan was in
+            # flight), so it still holds the background scan's now-stale quotes.
+            # Drop them so order sizing/reconciliation uses fresh prices.
+            self.agent.clear_price_cache()
             run = self.agent.reconcile_and_execute(
                 scan, execute=execute, allow_buys=not halted, exclude_tickers=pending,
                 broker=broker, account=account)
@@ -285,7 +289,8 @@ class AlwaysOnAgent:
                     triggered.add(tk)
                     self.journal.record_order(ticker=tk, side="sell", qty=pos.quantity,
                                               price=px, reason=f"stop {stop}",
-                                              status="submitted", mode=self._mode())
+                                              status=(res or {}).get("status", "submitted"),
+                                              mode=self._mode())
                 elif not execute:
                     log.info("STOP preview for %s — keeping stop state unchanged", tk)
                 else:
@@ -303,7 +308,8 @@ class AlwaysOnAgent:
                     triggered.add(tk)
                     self.journal.record_order(ticker=tk, side="sell", qty=pos.quantity * 0.5,
                                               price=px, reason=f"take-profit {tp}",
-                                              status="submitted", mode=self._mode())
+                                              status=(res or {}).get("status", "submitted"),
+                                              mode=self._mode())
                 elif not execute:
                     log.info("TP preview for %s — keeping TP state unchanged", tk)
                 else:

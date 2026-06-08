@@ -416,7 +416,7 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
 
     class _Agent:
         def clear_price_cache(self):
-            pass
+            events.append("clear")
         def make_broker(self):
             return _Brk()
         def default_equity(self):
@@ -446,7 +446,28 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
     d.tick(execute=False)
     assert "scan" in events and "reconcile" in events
     assert d._scan_future is None and d._pending_scan is None
+    # The quote cache is cleared right before reconciling, so order sizing uses
+    # fresh prices rather than the background scan's stale cached quotes.
+    assert events[events.index("reconcile") - 1] == "clear"
     d._scan_pool.shutdown(wait=False)
+
+
+def test_manage_risk_journals_broker_reported_status(tmp_path):
+    import json
+    import rh_agent.daemon as daemon
+    d = _daemon_for_risk_test(price=90.0)          # stop at 95, px 90 -> stop fires
+    d.journal = daemon.Journal(d.cfg)
+    d.journal.path = tmp_path / "j.jsonl"
+    d.journal.memory_path = tmp_path / "m.md"
+    d.journal.enabled = True
+    acct = Account(equity=1_000.0, cash=0.0, buying_power=0.0,
+                   positions=[Position("AAA", 1.0, 100.0, current_price=90.0)])
+    # broker reports "filled" -> journal records "filled", not a hard-coded "submitted"
+    d._manage_risk(_FakeBroker("filled"), acct, execute=True)
+    recs = [json.loads(line) for line in d.journal.path.read_text().splitlines() if line.strip()]
+    assert len(recs) == 1
+    assert recs[0]["status"] == "filled"
+    assert recs[0]["side"] == "sell" and recs[0]["reason"].startswith("stop")
 
 
 def test_daemon_state_load_tolerates_corruption(tmp_path, monkeypatch):
