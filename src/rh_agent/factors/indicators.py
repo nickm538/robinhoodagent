@@ -37,20 +37,20 @@ def macd_hist(close: pd.Series, fast=12, slow=26, signal=9) -> float | None:
 def atr(df: pd.DataFrame, period: int = 14) -> float | None:
     if not {"high", "low", "close"}.issubset(df.columns) or len(df) < period + 1:
         return None
-    h, l, c = df["high"], df["low"], df["close"]
-    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    h, low_price, c = df["high"], df["low"], df["close"]
+    tr = pd.concat([h - low_price, (h - c.shift()).abs(), (low_price - c.shift()).abs()], axis=1).max(axis=1)
     return float(tr.ewm(alpha=1 / period, adjust=False).mean().iloc[-1])
 
 
 def adx(df: pd.DataFrame, period: int = 14) -> float | None:
     if not {"high", "low", "close"}.issubset(df.columns) or len(df) < 2 * period:
         return None
-    h, l, c = df["high"], df["low"], df["close"]
+    h, low_price, c = df["high"], df["low"], df["close"]
     up_move = h.diff()
-    down_move = -l.diff()
+    down_move = -low_price.diff()
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    tr = pd.concat([h - low_price, (h - c.shift()).abs(), (low_price - c.shift()).abs()], axis=1).max(axis=1)
     atr_ = pd.Series(tr).ewm(alpha=1 / period, adjust=False).mean()
     plus_di = 100 * pd.Series(plus_dm, index=df.index).ewm(alpha=1 / period, adjust=False).mean() / atr_
     minus_di = 100 * pd.Series(minus_dm, index=df.index).ewm(alpha=1 / period, adjust=False).mean() / atr_

@@ -33,9 +33,17 @@ def _ret(c: pd.Series, lag_recent: int, lag_far: int) -> Optional[float]:
 
 
 # ------------------------------------------------------------------ momentum
-def mom_12_1(td):  c = _close(td); return _ret(c, 21, 252) if c is not None else None
-def mom_6_1(td):   c = _close(td); return _ret(c, 21, 126) if c is not None else None
-def mom_3_1(td):   c = _close(td); return _ret(c, 21, 63) if c is not None else None
+def mom_12_1(td):
+    c = _close(td)
+    return _ret(c, 21, 252) if c is not None else None
+
+def mom_6_1(td):
+    c = _close(td)
+    return _ret(c, 21, 126) if c is not None else None
+
+def mom_3_1(td):
+    c = _close(td)
+    return _ret(c, 21, 63) if c is not None else None
 
 
 def risk_adj_momentum(td):
