@@ -397,6 +397,8 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
     d.cfg = cfg
     d._scan_pool = ThreadPoolExecutor(max_workers=1)
     d._scan_future = None
+    d._scan_started_at = None
+    d._scan_timeout = 1800.0
     d._pending_scan = None
     d.journal = daemon.Journal(cfg)
     d.journal.enabled = False
@@ -430,6 +432,14 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
         def price_fn(self, t, for_risk=False):
             return 100.0
 
+    class _ScanAgent:
+        def __init__(self, cfg, snapshot_path=None):
+            pass
+        def scan(self, equity, include_tickers=None):
+            events.append("scan")
+            return scan_result
+
+    monkeypatch.setattr(daemon, "TradingAgent", _ScanAgent)
     d.agent = _Agent()
     d._ensure_stops_for_held = lambda *a, **k: None
     d._manage_risk = lambda *a, **k: set()
@@ -449,6 +459,59 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
     # The quote cache is cleared right before reconciling, so order sizing uses
     # fresh prices rather than the background scan's stale cached quotes.
     assert events[events.index("reconcile") - 1] == "clear"
+    d._scan_pool.shutdown(wait=False)
+
+
+def test_daemon_watchdog_abandons_stuck_scan(tmp_path, monkeypatch):
+    """A scan that never returns is abandoned after the timeout so hunting cannot
+    silently halt; the pool is replaced so a fresh scan can run next cycle."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime, timedelta, timezone
+    import rh_agent.daemon as daemon
+    monkeypatch.setattr(daemon, "STATE", tmp_path / "s.json")
+
+    d = daemon.AlwaysOnAgent.__new__(daemon.AlwaysOnAgent)
+    d.cfg = load_config()
+    d._scan_pool = ThreadPoolExecutor(max_workers=1)
+    d._scan_timeout = 5.0
+    d._pending_scan = None
+    d.journal = daemon.Journal(d.cfg)
+    d.journal.enabled = False
+    d.state = daemon.DaemonState(stops={}, take_profits={}, high_water={}, pending_risk={})
+
+    acct = Account(equity=1000.0, cash=1000.0, buying_power=1000.0, source="paper", positions=[])
+
+    class _Brk:
+        supports_live = False
+        def get_account(self):
+            return acct
+
+    class _Agent:
+        def clear_price_cache(self):
+            pass
+        def make_broker(self):
+            return _Brk()
+
+    d.agent = _Agent()
+    d._ensure_stops_for_held = lambda *a, **k: None
+    d._manage_risk = lambda *a, **k: set()
+    d._due_for_rebalance = lambda now: False    # don't kick a replacement this tick
+
+    # Simulate an in-flight scan that started well past the timeout and never returns.
+    release = threading.Event()
+    d._scan_future = d._scan_pool.submit(release.wait, 30)
+    d._scan_started_at = datetime.now(timezone.utc) - timedelta(seconds=60)
+    old_pool = d._scan_pool
+
+    d.tick(execute=False)
+
+    assert d._scan_future is None            # stuck scan abandoned
+    assert d._scan_started_at is None
+    assert d._scan_pool is not old_pool      # pool was replaced so a fresh scan can run
+
+    release.set()
+    old_pool.shutdown(wait=False)
     d._scan_pool.shutdown(wait=False)
 
 
