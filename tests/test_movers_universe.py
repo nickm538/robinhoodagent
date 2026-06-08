@@ -1,8 +1,35 @@
 """Tests for the intraday movers feed and universe seeding (the sniping fix)."""
 from __future__ import annotations
 
+import math
+
+import numpy as np
+import pandas as pd
+
 from rh_agent.config import load_config
 from rh_agent.data import universe as U
+
+
+def test_light_guards_zero_historical_close():
+    """A zero close 63 bars back must not produce inf momentum (dirty data in
+    the wider universe) — it would otherwise sort garbage to the top of the funnel."""
+    closes = list(np.linspace(100.0, 120.0, 100))
+    closes[-63] = 0.0   # the divisor
+    df = pd.DataFrame({"close": closes, "volume": [1e6] * 100},
+                      index=pd.date_range("2024-01-01", periods=100, freq="B"))
+
+    class FakeMD:
+        def get_quote(self, t):
+            return None                      # px falls back to last close
+        def get_prices(self, t):
+            return df
+        def get_company(self, t):
+            return {"market_cap": 1e10, "sector": "Technology"}
+
+    c = U._light(FakeMD(), "AAA")
+    assert c is not None
+    assert math.isfinite(c.mom_63)
+    assert c.mom_63 == 0.0
 
 
 def test_alpha_vantage_movers_parsing(monkeypatch):
