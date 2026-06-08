@@ -29,8 +29,8 @@ def _harden_state_parent(path: Path) -> None:
 def daemon_lock(path: Path = DEFAULT_LOCK):
     """Acquire an exclusive non-blocking lock; raise if another instance holds it."""
     _harden_state_parent(path)
-    fh = open(path, "a+")
-    try:
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    fh = os.fdopen(fd, "r+")
         if os.name == "nt":
             import msvcrt
 
