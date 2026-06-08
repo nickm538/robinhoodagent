@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rh_agent.broker.paper import PaperBroker
 from rh_agent.config import load_config
@@ -116,6 +117,37 @@ def test_robinhood_account_pick_and_order_args():
     # sell -> quantity STRING; dry-run -> no ref_id
     s = order_args(Order("MSFT", "sell", 1.5, "market"), dry_run=True, account_number="X")
     assert s["quantity"] == "1.5" and "ref_id" not in s
+
+
+def test_cancel_all_continues_after_one_failure():
+    # A single failed cancel must not strand the remaining open orders.
+    from rh_agent.broker.robinhood_mcp import RobinhoodMCPBroker
+    b = RobinhoodMCPBroker.__new__(RobinhoodMCPBroker)   # skip __init__ (no network)
+    b.get_orders = lambda: [{"id": "A"}, {"id": "B"}, {"id": "C"}]
+    attempted = []
+
+    def fake_call(cap, args=None):
+        attempted.append(args["order_id"])
+        if args["order_id"] == "B":
+            raise RuntimeError("cancel B failed")
+        return {"status": "ok"}
+    b._call = fake_call
+
+    b.cancel_all()
+    assert attempted == ["A", "B", "C"]   # C still attempted despite B failing
+
+
+def test_cancel_all_handles_orders_listing_failure():
+    from rh_agent.broker.robinhood_mcp import RobinhoodMCPBroker
+    b = RobinhoodMCPBroker.__new__(RobinhoodMCPBroker)
+
+    def fake_call(cap, args=None):
+        if cap == "orders":
+            raise RuntimeError("orders unavailable")
+        pytest.fail(f"unexpected tool call: {cap}")
+
+    b._call = fake_call
+    b.cancel_all()   # must not raise
 
 
 def test_robinhood_sdk_place_order_returns_error_dict():
