@@ -3,12 +3,14 @@ normalisation -> panel verdicts. This is where the universe is ranked.
 """
 from __future__ import annotations
 
+import pandas as pd
+
 from .analysts.panel import Panel
 from .config import Config
 from .factors.library import FACTORS, compute_raw_factors
 from .factors.normalize import cross_sectional_scores
 from .logging_setup import get_logger
-from .models import TickerData, Verdict
+from .models import TickerData, Verdict, utcnow
 from .regime import RegimeResult
 
 log = get_logger("scoring")
@@ -61,6 +63,19 @@ class Scorer:
         return verdicts
 
     def _add_flags(self, v: Verdict, td: TickerData) -> None:
+        freshness = self.cfg.get("data.freshness", {}) or {}
+        max_quote_age = float(freshness.get("quote_max_age_seconds", 120))
+        max_prices_age_days = float(freshness.get("prices_max_age_days", 5))
+        if td.quote is not None:
+            age = (utcnow() - td.quote.asof).total_seconds()
+            if age > max_quote_age:
+                v.flags.append("stale_quote")
+        if td.prices is not None and len(td.prices):
+            last = pd.to_datetime(td.prices.index[-1])
+            if last.tzinfo is None:
+                last = last.tz_localize("UTC")
+            if (utcnow() - last.to_pydatetime()).total_seconds() > max_prices_age_days * 86400:
+                v.flags.append("stale_price_history")
         d = td.earnings.get("days_to_next")
         if isinstance(d, (int, float)) and d < 5:
             v.flags.append(f"earnings_in_{int(d)}d")
@@ -87,6 +102,7 @@ class Scorer:
         raw_earnings_days = rc.get("block_earnings_within_days", 2)
         block_earnings_days = int(raw_earnings_days) if raw_earnings_days is not None else 0
         block_high_vol = bool(rc.get("block_high_volatility", False))
+        block_stale_quote = bool(rc.get("block_stale_quote", True))
         out = []
         for v in verdicts:
             if v.composite < min_conf or v.pillars_passing < min_pillars:
@@ -94,6 +110,8 @@ class Scorer:
             if block_ai and "ai_caution" in v.flags:
                 continue
             if block_high_vol and "high_volatility" in v.flags:
+                continue
+            if block_stale_quote and "stale_quote" in v.flags:
                 continue
             if block_earnings_days > 0:
                 blocked = False

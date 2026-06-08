@@ -183,6 +183,20 @@ class TradingAgent:
                 "ticker": v.ticker, "sector": td.sector,
                 "quant_composite": round(v.composite, 1),
                 "quant_pillars": v.analyst_scores,
+                "flags": list(v.flags),
+                "data_quality": self._data_quality_context(td),
+                "price_pattern": self._historical_pattern_context(td),
+                "market_relationship": self._market_relationship_context(td),
+                "options_flow": {k: td.options.get(k) for k in
+                                 ("put_call_ratio", "iv_rank", "call_volume", "put_volume")
+                                 if td.options.get(k) is not None},
+                "short_interest": {k: td.short_interest.get(k) for k in
+                                   ("short_pct_float", "days_to_cover", "short_shares")
+                                   if td.short_interest.get(k) is not None},
+                "smart_money": {
+                    "institutional_net_change_pct": td.institutional.get("net_change_pct"),
+                    "insider_transactions": len(td.insider or []),
+                },
                 "fundamentals": {k: round(f[k], 3) for k in
                                  ("roe", "net_margin", "revenue_growth", "earnings_growth",
                                   "pe_ratio", "debt_to_equity") if isinstance(f.get(k), (int, float))},
@@ -208,6 +222,72 @@ class TradingAgent:
         log.info("AI overlay: blended %d names (weight %.2f) | %s",
                  len(res.views), w, res.market_read[:120])
         return res.market_read or ""
+
+    def _data_quality_context(self, td: TickerData) -> dict:
+        quote_age = None
+        if td.quote is not None:
+            try:
+                from .models import utcnow
+                quote_age = round((utcnow() - td.quote.asof).total_seconds(), 1)
+            except Exception:
+                quote_age = None
+        price_last = None
+        if td.prices is not None and len(td.prices):
+            try:
+                price_last = str(pd.to_datetime(td.prices.index[-1]).date())
+            except Exception:
+                price_last = None
+        return {
+            "quote_source": getattr(td.quote, "source", "") if td.quote else "",
+            "quote_age_seconds": quote_age,
+            "price_history_last_date": price_last,
+            "has_options": bool(td.options),
+            "has_short_interest": bool(td.short_interest),
+            "has_news_sentiment": bool(td.news_sentiment),
+            "has_institutional": bool(td.institutional),
+        }
+
+    def _historical_pattern_context(self, td: TickerData) -> dict:
+        if td.prices is None or "close" not in td.prices or len(td.prices) < 30:
+            return {}
+        close = td.prices["adj_close"] if "adj_close" in td.prices else td.prices["close"]
+        close = close.dropna()
+        if len(close) < 30:
+            return {}
+        out: dict = {}
+        for days in (5, 21, 63, 126, 252):
+            if len(close) > days and close.iloc[-days - 1] > 0:
+                out[f"return_{days}d"] = round(float(close.iloc[-1] / close.iloc[-days - 1] - 1), 4)
+        rolling_high = close.iloc[-63:].max() if len(close) >= 63 else close.max()
+        if rolling_high:
+            out["drawdown_from_63d_high"] = round(float(close.iloc[-1] / rolling_high - 1), 4)
+        rets = close.pct_change().dropna()
+        if len(rets) >= 20:
+            out["realized_vol_63d"] = round(float(rets.iloc[-63:].std() * (252 ** 0.5)), 4)
+        return out
+
+    def _market_relationship_context(self, td: TickerData) -> dict:
+        if td.prices is None or "close" not in td.prices or len(td.prices) < 63:
+            return {}
+        try:
+            spy = self.md.get_index_prices("SPY")
+        except Exception:
+            spy = None
+        if spy is None or "close" not in spy or len(spy) < 63:
+            return {}
+        own = (td.prices["adj_close"] if "adj_close" in td.prices else td.prices["close"]).pct_change()
+        bench = (spy["adj_close"] if "adj_close" in spy else spy["close"]).pct_change()
+        aligned = pd.concat([own.rename("own"), bench.rename("spy")], axis=1).dropna().iloc[-126:]
+        if len(aligned) < 30:
+            return {}
+        corr = float(aligned["own"].corr(aligned["spy"]))
+        var = float(aligned["spy"].var())
+        beta = float(aligned["own"].cov(aligned["spy"]) / var) if var else None
+        return {
+            "spy_correlation": round(corr, 3),
+            "spy_beta": round(beta, 3) if beta is not None else None,
+            "note": "Correlation is descriptive only; require a plausible causal channel.",
+        }
 
     # ---- broker ----
     def make_broker(self):

@@ -76,6 +76,10 @@ class MarketData:
 
     def get_quote_for_risk(self, t: str, max_age_seconds: float = 180) -> Quote | None:
         """Fetch a quote for stop/TP decisions, bypassing stale disk cache when needed."""
+        # Provider caches store raw payloads, not Quote.asof, so a cached payload
+        # can otherwise be rewrapped with a fresh timestamp. Force a live read on
+        # this path; it is used only where stale prices are dangerous.
+        self._invalidate_quote_cache(t)
         q = self._try("quote", "get_quote", t)
         if q and q.price:
             age = (utcnow() - q.asof).total_seconds()
@@ -176,7 +180,14 @@ class MarketData:
               price_start: str | None = None) -> TickerData:
         td = TickerData(ticker=ticker)
         td.company = self.get_company(ticker)
-        td.quote = self.get_quote(ticker)
+        intraday = self.cfg.get("universe.intraday", {}) or {}
+        if intraday.get("enabled", False):
+            td.quote = self.get_quote_for_risk(
+                ticker,
+                max_age_seconds=float(intraday.get("quote_max_age_seconds", 60)),
+            )
+        else:
+            td.quote = self.get_quote(ticker)
         td.prices = self.get_prices(ticker, start=price_start)
         td.fundamentals = self._merge("fundamentals", "get_fundamentals", ticker)
         # market cap fallback chain

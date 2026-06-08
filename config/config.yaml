@@ -226,6 +226,7 @@ portfolio:
     hard_stop_pct: 0.18          # absolute -18% disaster stop floor
     max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day (sells still run)
     per_trade_risk_pct: 0.01     # cap position weight so loss at stop ~1% of equity
+    block_stale_quote: true      # never open/add from stale live quote data
     block_ai_caution: true       # exclude names flagged bearish by Claude overlay
     block_earnings_within_days: 2  # skip new entries within N days of earnings
     block_high_volatility: false
@@ -252,6 +253,9 @@ ai_analyst:
 # ----------------------------------------------------------------------
 data:
   max_workers: 8
+  freshness:
+    quote_max_age_seconds: 120
+    prices_max_age_days: 5
 
 # ----------------------------------------------------------------------
 # DAEMON  — the always-on autonomous loop.
