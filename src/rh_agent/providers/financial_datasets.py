@@ -175,9 +175,11 @@ class FinancialDatasetsProvider(DataProvider):
         for it in items:
             s = (it.get("sentiment") or "").lower()
             if s in ("positive", "bullish"):
-                score += 1; n += 1
+                score += 1
+                n += 1
             elif s in ("negative", "bearish"):
-                score -= 1; n += 1
+                score -= 1
+                n += 1
             elif s in ("neutral",):
                 n += 1
         return {"score": (score / n) if n else None, "article_count": len(items),

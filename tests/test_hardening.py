@@ -7,7 +7,7 @@ from rh_agent.agent import TradingAgent
 from rh_agent.broker.errors import LiveBrokerUnavailable
 from rh_agent.broker.orders import order_succeeded, stable_ref_id
 from rh_agent.broker.robinhood_mcp import parse_account
-from rh_agent.config import Config, load_config
+from rh_agent.config import load_config
 from rh_agent.execution import build_orders
 from rh_agent.models import Account, Order, Position, TargetPosition, Verdict
 from rh_agent.risk import risk_capped_weight, trailing_stop

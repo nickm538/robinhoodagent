@@ -40,7 +40,9 @@ def daemon_lock(path: Path = DEFAULT_LOCK):
                 raise ProcessLockError(
                     f"Another rh-agent daemon holds {path} — refusing to start."
                 ) from e
-        fh.seek(0); fh.truncate(); fh.write(str(os.getpid()))
+        fh.seek(0)
+        fh.truncate()
+        fh.write(str(os.getpid()))
         fh.flush()
         log.info("acquired daemon lock %s", path)
         yield

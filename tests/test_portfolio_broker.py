@@ -187,7 +187,7 @@ def test_build_orders_respects_buying_power():
     # (sized against equity) implies a far larger order — else the broker 400s
     # with "Not enough buying power".
     from rh_agent.execution import build_orders
-    from rh_agent.models import Account, TargetPosition
+    from rh_agent.models import Account
     cfg = load_config()
     acct = Account(equity=10_000, cash=100.0, buying_power=100.0, positions=[])
     targets = [TargetPosition("AAA", 0.12, 80, sector="Tech")]   # weight implies ~$1200
@@ -201,7 +201,7 @@ def test_build_orders_respects_buying_power():
 
 def test_build_orders_no_cap_when_cash_ample():
     from rh_agent.execution import build_orders
-    from rh_agent.models import Account, TargetPosition
+    from rh_agent.models import Account
     cfg = load_config()
     acct = Account(equity=10_000, cash=10_000.0, buying_power=10_000.0, positions=[])
     targets = [TargetPosition("AAA", 0.12, 80, sector="Tech")]

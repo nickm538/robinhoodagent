@@ -188,25 +188,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("probe", help="read-only dump of Robinhood MCP tool schemas").set_defaults(
         func=cmd_probe)
-    s = sub.add_parser("status"); s.add_argument("--snapshot"); s.set_defaults(func=cmd_status)
+    s = sub.add_parser("status")
+    s.add_argument("--snapshot")
+    s.set_defaults(func=cmd_status)
 
     s = sub.add_parser("scan")
-    s.add_argument("--snapshot"); s.add_argument("--limit", type=int)
+    s.add_argument("--snapshot")
+    s.add_argument("--limit", type=int)
     s.add_argument("--tickers", help="comma-separated watchlist, e.g. NVDA,MSFT,AAPL")
-    s.add_argument("--equity", type=float); s.add_argument("--md", action="store_true")
+    s.add_argument("--equity", type=float)
+    s.add_argument("--md", action="store_true")
     s.add_argument("--json", nargs="?", const="-")
     s.set_defaults(func=cmd_scan)
 
     s = sub.add_parser("run")
-    s.add_argument("--snapshot"); s.add_argument("--limit", type=int)
+    s.add_argument("--snapshot")
+    s.add_argument("--limit", type=int)
     s.add_argument("--tickers", help="comma-separated watchlist")
     s.add_argument("--execute", action="store_true", help="place orders (paper unless live armed)")
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("backtest")
-    s.add_argument("--snapshot"); s.add_argument("--limit", type=int)
+    s.add_argument("--snapshot")
+    s.add_argument("--limit", type=int)
     s.add_argument("--tickers", help="comma-separated watchlist")
-    s.add_argument("--start"); s.add_argument("--end")
+    s.add_argument("--start")
+    s.add_argument("--end")
     s.set_defaults(func=cmd_backtest)
 
     s = sub.add_parser("loop", help="run the always-on autonomous agent")

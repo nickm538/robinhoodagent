@@ -64,7 +64,7 @@ def render_run(run) -> None:
             _print(f"  {o.side.upper():4} {o.ticker:6} "
                    f"{('$%.0f' % o.notional) if o.notional else ('%.2f sh' % o.quantity)}  — {o.reason}")
     if run.fills:
-        _print(f"\n[bold]Fills[/bold]:" if _con else "\nFills:")
+        _print("\n[bold]Fills[/bold]:" if _con else "\nFills:")
         for f in run.fills:
             _print(f"  {f}")
 
@@ -85,7 +85,9 @@ def render_backtest(res) -> None:
     ]
     if _con:
         t = Table(header_style="bold cyan")
-        t.add_column("Metric"); t.add_column("Strategy"); t.add_column("Benchmark")
+        t.add_column("Metric")
+        t.add_column("Strategy")
+        t.add_column("Benchmark")
         for r in rows:
             t.add_row(*r)
         _con.print(t)
