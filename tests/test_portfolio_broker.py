@@ -141,10 +141,12 @@ def test_cancel_all_handles_orders_listing_failure():
     from rh_agent.broker.robinhood_mcp import RobinhoodMCPBroker
     b = RobinhoodMCPBroker.__new__(RobinhoodMCPBroker)
 
-    def boom():
-        raise RuntimeError("orders unavailable")
-    b.get_orders = boom
-    b._call = lambda *a, **k: pytest.fail("should not cancel when listing failed")
+    def fake_call(cap, args=None):
+        if cap == "orders":
+            raise RuntimeError("orders unavailable")
+        pytest.fail(f"unexpected tool call: {cap}")
+
+    b._call = fake_call
     b.cancel_all()   # must not raise
 
 
