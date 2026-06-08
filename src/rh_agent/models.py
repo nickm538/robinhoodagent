@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -70,17 +70,6 @@ class TickerData:
     @property
     def sector(self) -> str:
         return self.company.get("sector") or "Unknown"
-
-
-@dataclass
-class AnalystVerdict:
-    """One persona's read on a ticker."""
-
-    name: str
-    score: float                      # 0..100
-    factor_scores: dict = field(default_factory=dict)
-    rationale: str = ""
-    coverage: float = 1.0             # fraction of factors that had data
 
 
 @dataclass

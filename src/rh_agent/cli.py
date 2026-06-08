@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 
-from .config import Config, load_config
+from .config import load_config
 from .logging_setup import get_logger, setup_logging
 
 log = get_logger("cli")

@@ -11,7 +11,6 @@ the corresponding factor neutralises itself.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from ..logging_setup import get_logger
 from .base import DataProvider, DiskCache, HttpClient, ProviderUnsupported

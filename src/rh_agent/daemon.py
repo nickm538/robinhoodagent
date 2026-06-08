@@ -19,7 +19,6 @@ import json
 import time
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
-from pathlib import Path
 
 try:
     from zoneinfo import ZoneInfo
@@ -29,7 +28,7 @@ except Exception:  # pragma: no cover
 
 from .agent import TradingAgent
 from .broker.orders import order_succeeded
-from .config import REPO_ROOT, Config
+from .config import REPO_ROOT, Config, write_private
 from .logging_setup import get_logger
 from .market_calendar import is_market_open
 from .models import Order
@@ -74,8 +73,7 @@ class DaemonState:
         return cls(stops={}, take_profits={}, high_water={}, pending_risk={})
 
     def save(self) -> None:
-        STATE.parent.mkdir(parents=True, exist_ok=True)
-        STATE.write_text(json.dumps(self.__dict__, indent=2, default=str))
+        write_private(STATE, json.dumps(self.__dict__, indent=2, default=str))
 
 
 def _valid_iso(s: str) -> bool:

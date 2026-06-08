@@ -21,6 +21,29 @@ except Exception:  # pragma: no cover
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "config" / "config.yaml"
 
+
+def write_private(path: Path, text: str) -> None:
+    """Write a file that holds account/credential data with owner-only perms.
+
+    The file is created with 0600 from the start (via ``os.open``) to avoid the
+    brief world-readable window a plain ``write_text`` + ``chmod`` would leave,
+    and its parent directory is tightened to 0700. ``chmod`` is best-effort so
+    this is a no-op on filesystems that do not support POSIX permissions.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
 # Map provider name -> environment variable holding its key. We accept several
 # spellings because different hosts pre-seed differently.
 _KEY_ENV = {
@@ -95,10 +118,6 @@ class Config:
             self.execution_mode == "live"
             and os.getenv("LIVE_TRADING_CONFIRM", "") == "I_UNDERSTAND_REAL_MONEY"
         )
-
-    def available_providers(self) -> dict:
-        """Which data providers actually have keys present."""
-        return {p: bool(self.api_key(p)) for p in _KEY_ENV}
 
 
 def load_config(path: str | Path | None = None) -> Config:

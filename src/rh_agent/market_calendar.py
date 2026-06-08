@@ -1,7 +1,7 @@
 """US equity session calendar (NYSE-style regular + early-close days)."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 try:
     from zoneinfo import ZoneInfo
