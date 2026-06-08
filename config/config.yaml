@@ -64,15 +64,28 @@ universe:
   liquidity:
     min_price: 5.0                # no penny stocks
     max_price: 100000.0
-    min_market_cap: 1000000000    # >= $1B (large/mid; tunable to 300M for more "diamonds")
-    min_avg_dollar_volume: 5000000  # >= $5M traded/day -> tradable without slippage
-    min_avg_volume_shares: 200000
+    min_market_cap: 300000000     # widen to liquid small/mid caps for "diamond" discovery
+    min_avg_dollar_volume: 2000000  # enough liquidity to trade without chasing microcaps
+    min_avg_volume_shares: 100000
     min_history_days: 200         # need enough bars for 200dma / 12-1 momentum
+  scan_cap: 1500                  # cap raw market scan per pass to keep latency bounded
   # Hard exclusions
   exclude_sectors: []             # e.g. ["Energy"] to sit out a sector
   blacklist: []                   # tickers to never trade
-  # Broad multi-sector hunt incl. mid-cap "diamonds in the rough". [] = full-universe.
-  watchlist: ["NVDA","MSFT","AAPL","GOOGL","AMZN","META","AVGO","ORCL","CRM","AMD","QCOM","NOW","MU","PANW","ANET","CRWD","MRVL","NFLX","TMUS","HD","MCD","NKE","BKNG","UBER","ABNB","CMG","DKNG","CELH","PG","KO","COST","WMT","LLY","UNH","JNJ","ABBV","MRK","TMO","ISRG","VRTX","HIMS","JPM","BAC","GS","BLK","SPGI","AXP","V","MA","COIN","SOFI","HOOD","CAT","GE","HON","BA","DE","RTX","ETN","VRT","XOM","CVX","LIN","NEE","VST","CEG","PLD","PLTR","SMCI","APP","RKLB","CVNA","AFRM","DUOL","TOST","ELF","ONON","RDDT","ASTS","NET","DDOG","SNOW","TTD","MDB"]
+  # Empty watchlist = discover candidates dynamically from provider listing feeds.
+  watchlist: []
+  # Intraday radar: fast quote/volume/change filter before expensive deep scoring.
+  intraday:
+    enabled: true
+    quote_max_age_seconds: 60
+    max_candidates: 120
+    min_candidates: 30
+    min_day_change_pct: 2.0
+    min_positive_day_change_pct: 0.5
+    min_relative_volume: 1.5
+    min_dollar_volume_today: 2000000
+    min_breakout_pct: 0.01
+    fallback_to_liquid_universe: true
   # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
   # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
   two_stage_threshold: 40         # above this many names, engage the funnel
@@ -194,16 +207,26 @@ portfolio:
       - [10000, 10, 0.14, 0.40]
       - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "weekly"           # weekly re-rank fits 1-3mo horizon; intraday poll handles stops
-    intraday_hours: 2            # used only when schedule: intraday
+    schedule: "intraday"         # high-reactivity market-open re-rank/reconcile
+    intraday_hours: 0.25         # every 15 minutes; daemon poll still handles stops faster
     no_trade_band: 0.015         # only act on drift >= 1.5% — ignore intraday noise (1-3mo horizon)
     max_turnover_per_rebalance: 0.30  # cap churn per rebalance
+    # Sell discipline for held names: stops/TPs still fire every tick, while
+    # normal rebalances require real score/pillar deterioration before exiting.
+    exit_hysteresis_enabled: true
+    exit_conviction_score: 45.0
+    exit_min_pillars: 1
+    hold_on_missing_data: true
+    exit_on_ai_caution: true
+    exit_on_high_volatility: false
+    exit_on_earnings_within_days: 0
   risk_controls:
     stop_loss_atr_mult: 2.5      # initial + trailing stop at N× ATR(14) from high-water mark
     take_profit_atr_mult: 6.0
     hard_stop_pct: 0.18          # absolute -18% disaster stop floor
     max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day (sells still run)
     per_trade_risk_pct: 0.01     # cap position weight so loss at stop ~1% of equity
+    block_stale_quote: true      # never open/add from stale live quote data
     block_ai_caution: true       # exclude names flagged bearish by Claude overlay
     block_earnings_within_days: 2  # skip new entries within N days of earnings
     block_high_volatility: false
@@ -230,12 +253,15 @@ ai_analyst:
 # ----------------------------------------------------------------------
 data:
   max_workers: 8
+  freshness:
+    quote_max_age_seconds: 120
+    prices_max_age_days: 5
 
 # ----------------------------------------------------------------------
 # DAEMON  — the always-on autonomous loop.
 # ----------------------------------------------------------------------
 daemon:
-  poll_seconds: 300            # risk/stop checks every 5 min (faster reaction; rebalance still gated by its own cadence)
+  poll_seconds: 60             # risk/stop checks every minute; rebalance gated by cadence above
   trade_only_when_open: true   # only trade during US market hours
   manage_stops_every_tick: true
 

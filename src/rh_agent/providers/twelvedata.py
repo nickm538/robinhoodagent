@@ -43,6 +43,10 @@ class TwelveDataProvider(DataProvider):
                      day_change_pct=float(d["percent_change"]) if d.get("percent_change") else None,
                      source=self.name)
 
+    def invalidate_quote(self, ticker: str) -> None:
+        key = f"/quote|{sorted({'symbol': ticker}.items())}"
+        self.cache._path("td/quote", key).unlink(missing_ok=True)
+
     def get_prices(self, ticker: str, start=None, end=None, interval="day") -> pd.DataFrame:
         iv = {"day": "1day", "week": "1week", "month": "1month"}.get(interval, "1day")
         d = self._q("ts", 720, "/time_series",

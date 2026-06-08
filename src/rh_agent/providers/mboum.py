@@ -67,6 +67,10 @@ class MboumProvider(DataProvider):
             source=self.name,
         )
 
+    def invalidate_quote(self, ticker: str) -> None:
+        key = f"/v1/markets/quote|{sorted({'ticker': ticker, 'type': 'STOCKS'}.items())}"
+        self.cache._path("mboum/quote", key).unlink(missing_ok=True)
+
     # ------------------------------------------------------------------ prices
     def get_prices(self, ticker: str, start: str | None = None, end: str | None = None,
                    interval: str = "day") -> pd.DataFrame:

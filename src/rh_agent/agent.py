@@ -13,7 +13,7 @@ from .config import Config
 from .data.market_data import MarketData
 from .execution import build_orders
 from .logging_setup import get_logger
-from .models import Account, Order, TargetPosition, TickerData, Verdict
+from .models import Account, Order, Position, TargetPosition, TickerData, Verdict
 from .portfolio import PortfolioBuilder
 from .providers import build_providers, snapshot_priorities
 from .regime import RegimeResult, detect_regime
@@ -80,18 +80,25 @@ class TradingAgent:
         every tick so stop-loss checks never evaluate against a stale, frozen price."""
         self._quote_cache.clear()
 
-    def universe(self, limit: int | None = None, watchlist: list[str] | None = None) -> list[str]:
+    def universe(self, limit: int | None = None, watchlist: list[str] | None = None,
+                 include_tickers: list[str] | None = None) -> list[str]:
         # explicit --tickers (even if empty) overrides config universe.watchlist;
         # only fall back to config when no watchlist was passed at all.
         wl = watchlist if watchlist is not None else (self.cfg.get("universe.watchlist") or [])
         if wl:
             tickers = [t.strip().upper() for t in wl if t and t.strip()]
-            return tickers[:limit] if limit else tickers
-        if "snapshot" in self.providers:
+        elif "snapshot" in self.providers:
             tickers = self.providers["snapshot"].list_universe()
         else:
             from .data.universe import build_universe
             tickers = build_universe(self.md, self.cfg)
+        if include_tickers:
+            seen = set(tickers)
+            for t in include_tickers:
+                tk = t.strip().upper() if isinstance(t, str) else ""
+                if tk and tk not in seen:
+                    tickers.append(tk)
+                    seen.add(tk)
         return tickers[:limit] if limit else tickers
 
     def _gather(self, tickers: list[str], deep: bool = True) -> list[TickerData]:
@@ -119,10 +126,10 @@ class TradingAgent:
 
     # ---- scan & score ----
     def scan(self, equity: float | None = None, limit: int | None = None,
-             tickers: list[str] | None = None) -> ScanResult:
+             tickers: list[str] | None = None, include_tickers: list[str] | None = None) -> ScanResult:
         if equity is None:                 # 0.0 is a valid (empty-account) sizing -> keep it
             equity = self.default_equity()
-        names = self.universe(limit, watchlist=tickers)
+        names = self.universe(limit, watchlist=tickers, include_tickers=include_tickers)
         full_n = len(names)
         regime = detect_regime(self.md, self.cfg)
 
@@ -138,6 +145,13 @@ class TradingAgent:
             light = self._gather(names, deep=False)
             light_v = self.scorer.score(light, regime)
             names = [v.ticker for v in light_v[:top_k]]
+            if include_tickers:
+                seen = set(names)
+                for t in include_tickers:
+                    tk = t.strip().upper() if isinstance(t, str) else ""
+                    if tk and tk not in seen:
+                        names.append(tk)
+                        seen.add(tk)
 
         log.info("deep-scoring %d tickers", len(names))
         data = self._gather(names, deep=True)
@@ -169,6 +183,20 @@ class TradingAgent:
                 "ticker": v.ticker, "sector": td.sector,
                 "quant_composite": round(v.composite, 1),
                 "quant_pillars": v.analyst_scores,
+                "flags": list(v.flags),
+                "data_quality": self._data_quality_context(td),
+                "price_pattern": self._historical_pattern_context(td),
+                "market_relationship": self._market_relationship_context(td),
+                "options_flow": {k: td.options.get(k) for k in
+                                 ("put_call_ratio", "iv_rank", "call_volume", "put_volume")
+                                 if td.options.get(k) is not None},
+                "short_interest": {k: td.short_interest.get(k) for k in
+                                   ("short_pct_float", "days_to_cover", "short_shares")
+                                   if td.short_interest.get(k) is not None},
+                "smart_money": {
+                    "institutional_net_change_pct": td.institutional.get("net_change_pct"),
+                    "insider_transactions": len(td.insider or []),
+                },
                 "fundamentals": {k: round(f[k], 3) for k in
                                  ("roe", "net_margin", "revenue_growth", "earnings_growth",
                                   "pe_ratio", "debt_to_equity") if isinstance(f.get(k), (int, float))},
@@ -194,6 +222,72 @@ class TradingAgent:
         log.info("AI overlay: blended %d names (weight %.2f) | %s",
                  len(res.views), w, res.market_read[:120])
         return res.market_read or ""
+
+    def _data_quality_context(self, td: TickerData) -> dict:
+        quote_age = None
+        if td.quote is not None:
+            try:
+                from .models import utcnow
+                quote_age = round((utcnow() - td.quote.asof).total_seconds(), 1)
+            except Exception:
+                quote_age = None
+        price_last = None
+        if td.prices is not None and len(td.prices):
+            try:
+                price_last = str(pd.to_datetime(td.prices.index[-1]).date())
+            except Exception:
+                price_last = None
+        return {
+            "quote_source": getattr(td.quote, "source", "") if td.quote else "",
+            "quote_age_seconds": quote_age,
+            "price_history_last_date": price_last,
+            "has_options": bool(td.options),
+            "has_short_interest": bool(td.short_interest),
+            "has_news_sentiment": bool(td.news_sentiment),
+            "has_institutional": bool(td.institutional),
+        }
+
+    def _historical_pattern_context(self, td: TickerData) -> dict:
+        if td.prices is None or "close" not in td.prices or len(td.prices) < 30:
+            return {}
+        close = td.prices["adj_close"] if "adj_close" in td.prices else td.prices["close"]
+        close = close.dropna()
+        if len(close) < 30:
+            return {}
+        out: dict = {}
+        for days in (5, 21, 63, 126, 252):
+            if len(close) > days and close.iloc[-days - 1] > 0:
+                out[f"return_{days}d"] = round(float(close.iloc[-1] / close.iloc[-days - 1] - 1), 4)
+        rolling_high = close.iloc[-63:].max() if len(close) >= 63 else close.max()
+        if rolling_high:
+            out["drawdown_from_63d_high"] = round(float(close.iloc[-1] / rolling_high - 1), 4)
+        rets = close.pct_change().dropna()
+        if len(rets) >= 20:
+            out["realized_vol_63d"] = round(float(rets.iloc[-63:].std() * (252 ** 0.5)), 4)
+        return out
+
+    def _market_relationship_context(self, td: TickerData) -> dict:
+        if td.prices is None or "close" not in td.prices or len(td.prices) < 63:
+            return {}
+        try:
+            spy = self.md.get_index_prices("SPY")
+        except Exception:
+            spy = None
+        if spy is None or "close" not in spy or len(spy) < 63:
+            return {}
+        own = (td.prices["adj_close"] if "adj_close" in td.prices else td.prices["close"]).pct_change()
+        bench = (spy["adj_close"] if "adj_close" in spy else spy["close"]).pct_change()
+        aligned = pd.concat([own.rename("own"), bench.rename("spy")], axis=1).dropna().iloc[-126:]
+        if len(aligned) < 30:
+            return {}
+        corr = float(aligned["own"].corr(aligned["spy"]))
+        var = float(aligned["spy"].var())
+        beta = float(aligned["own"].cov(aligned["spy"]) / var) if var else None
+        return {
+            "spy_correlation": round(corr, 3),
+            "spy_beta": round(beta, 3) if beta is not None else None,
+            "note": "Correlation is descriptive only; require a plausible causal channel.",
+        }
 
     # ---- broker ----
     def make_broker(self):
@@ -239,7 +333,9 @@ class TradingAgent:
             return RunResult(scan=empty, account=account, orders=[], fills=[], executed=False,
                              mode="live")
         equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
-        scan = self.scan(equity=equity, tickers=tickers)
+        held_tickers = [p.ticker for p in account.positions]
+        scan = self.scan(equity=equity, tickers=tickers, include_tickers=held_tickers)
+        scan = self._apply_hold_discipline(scan, account, equity)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
                               allow_buys=allow_buys, exclude_tickers=exclude_tickers)
 
@@ -261,6 +357,103 @@ class TradingAgent:
         return RunResult(scan=scan, account=account, post_account=post_account,
                          orders=orders, fills=fills,
                          executed=execute, mode=mode)
+
+    def _apply_hold_discipline(self, scan: ScanResult, account: Account, equity: float) -> ScanResult:
+        """Use a lower exit bar than the buy bar so intraday scans do not churn.
+
+        Hard risk exits still happen in the daemon every tick. This layer only
+        decides whether a held name missing from the latest target book should
+        be kept at its current weight or consciously sold on clear deterioration.
+        """
+        reb = self.cfg.get("portfolio.rebalance", {}) or {}
+        if not reb.get("exit_hysteresis_enabled", True) or not account.positions:
+            return scan
+
+        target_map = {t.ticker: t for t in scan.targets}
+        verdict_map = {v.ticker: v for v in scan.verdicts}
+        td_map = scan.td_map or {}
+        targets = list(scan.targets)
+        hold_missing = bool(reb.get("hold_on_missing_data", True))
+
+        for pos in account.positions:
+            tk = pos.ticker
+            if tk in target_map:
+                continue
+            verdict = verdict_map.get(tk)
+            if verdict is None:
+                if hold_missing:
+                    target = self._held_target(pos, None, td_map.get(tk), equity,
+                                               "hold: missing scan data")
+                    if target:
+                        targets.append(target)
+                continue
+            if self._should_exit_held(verdict):
+                log.info("held %s failed exit discipline — allowing rebalance sell", tk)
+                continue
+            target = self._held_target(pos, verdict, td_map.get(tk), equity,
+                                       "hold: exit hysteresis")
+            if target:
+                targets.append(target)
+
+        if len(targets) != len(scan.targets):
+            scan.targets = targets
+        return scan
+
+    def _should_exit_held(self, verdict: Verdict) -> bool:
+        reb = self.cfg.get("portfolio.rebalance", {}) or {}
+        exit_score = float(reb.get("exit_conviction_score", 45.0))
+        exit_pillars = int(float(reb.get("exit_min_pillars", 1)))
+        if verdict.composite < exit_score or verdict.pillars_passing < exit_pillars:
+            return True
+        if reb.get("exit_on_ai_caution", True) and "ai_caution" in verdict.flags:
+            return True
+        if reb.get("exit_on_high_volatility", False) and "high_volatility" in verdict.flags:
+            return True
+        earnings_days = int(float(reb.get("exit_on_earnings_within_days", 0) or 0))
+        if earnings_days > 0:
+            for fl in verdict.flags:
+                if fl.startswith("earnings_in_"):
+                    try:
+                        if int(fl.split("_")[-1].rstrip("d")) <= earnings_days:
+                            return True
+                    except ValueError:
+                        pass
+        return False
+
+    def _held_target(self, pos: Position, verdict: Verdict | None, td: TickerData | None,
+                     equity: float, reason: str) -> TargetPosition | None:
+        px = self.price_fn(pos.ticker) or pos.current_price or pos.avg_price
+        if not px or equity <= 0:
+            return None
+        dollars = pos.quantity * px
+        if dollars <= 0:
+            return None
+        rc = self.cfg.get("portfolio.risk_controls", {}) or {}
+        stop = take = None
+        sector = "Unknown"
+        if td is not None:
+            sector = td.sector
+            atr = td.technicals.get("atr")
+            try:
+                from .risk import atr_stop, take_profit
+                stop = atr_stop(px, atr, rc.get("stop_loss_atr_mult", 2.5),
+                                rc.get("hard_stop_pct", 0.18))
+                take = take_profit(px, atr, rc.get("take_profit_atr_mult", 6.0))
+            except Exception:
+                pass
+        score = round(verdict.composite, 1) if verdict else 0.0
+        rationale = f"{reason}; score={score}" if verdict else reason
+        return TargetPosition(
+            ticker=pos.ticker,
+            weight=round(dollars / equity, 4),
+            score=score,
+            shares=round(pos.quantity, 4),
+            dollars=round(dollars, 2),
+            stop_price=stop,
+            take_profit=take,
+            sector=sector,
+            rationale=rationale,
+        )
 
     # ---- backtest ----
     def backtest(self, limit: int | None = None, tickers: list[str] | None = None) -> "object":

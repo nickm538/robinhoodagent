@@ -90,6 +90,10 @@ class FinancialDatasetsProvider(DataProvider):
             source=self.name,
         )
 
+    def invalidate_quote(self, ticker: str) -> None:
+        key = f"/prices/snapshot/|{sorted({'ticker': ticker}.items())}"
+        self.cache._path("fd/snap", key).unlink(missing_ok=True)
+
     def get_prices(self, ticker: str, start: str | None = None, end: str | None = None,
                    interval: str = "day") -> pd.DataFrame:
         # /prices/ REQUIRES start_date AND end_date — omitting them returns HTTP 400.

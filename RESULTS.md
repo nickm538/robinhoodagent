@@ -72,7 +72,7 @@ cash $79,990   equity $99,990   (–$10 = modelled slippage)
 ```
 
 State persists to `state/`; subsequent cycles manage stops/take-profits every
-tick and rebalance on the weekly cadence.
+tick and rebalance on the configured cadence.
 
 ## Reproduce
 

@@ -76,6 +76,14 @@ def test_funnel_engages_above_threshold(monkeypatch):
     assert res.universe_size == 20 and res.scored_size == 3
 
 
+def test_funnel_keeps_held_names_even_below_top_k(monkeypatch):
+    names = [f"T{i:02d}" for i in range(20)]
+    a, calls = _agent(monkeypatch, threshold=5, top_k=3, snapshot=False)
+    a.scan(equity=100_000, tickers=names, include_tickers=["T00"])
+
+    assert calls[1] == (True, ["T19", "T18", "T17", "T00"])
+
+
 def test_funnel_skipped_under_threshold(monkeypatch):
     names = [f"T{i:02d}" for i in range(4)]
     a, calls = _agent(monkeypatch, threshold=5, top_k=3, snapshot=False)
