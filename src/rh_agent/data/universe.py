@@ -4,6 +4,7 @@ most promising survivors.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ..config import Config
@@ -58,7 +59,12 @@ def _light(md: MarketData, ticker: str, *, max_quote_age_seconds: float | None =
     if day_change is None and q and q.prev_close:
         day_change = (px / float(q.prev_close) - 1.0) * 100
     hist = len(df)
-    mom = float(df["close"].iloc[-1] / df["close"].iloc[-63] - 1) if hist >= 63 else 0.0
+    # Guard against a zero/NaN historical close (dirty data in the wider universe)
+    # — an unguarded divide yields inf momentum that would sort garbage to the top.
+    prev_close = float(df["close"].iloc[-63]) if hist >= 63 else 0.0
+    mom = (float(df["close"].iloc[-1]) / prev_close - 1.0) if prev_close > 0 else 0.0
+    if not math.isfinite(mom):
+        mom = 0.0
     high_20 = float(df["close"].iloc[-20:].max()) if hist >= 20 else px
     breakout = (px / high_20 - 1.0) if high_20 else 0.0
     return Candidate(ticker, float(px), float(mcap or 0), adv, avg_volume, hist, mom,
