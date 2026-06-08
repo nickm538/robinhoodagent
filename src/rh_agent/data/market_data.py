@@ -89,6 +89,12 @@ class MarketData:
     def _invalidate_quote_cache(self, ticker: str) -> None:
         key = ticker.upper()
         for p in self.providers.values():
+            if hasattr(p, "invalidate_quote"):
+                try:
+                    p.invalidate_quote(key)
+                    continue
+                except Exception:
+                    pass
             cache = getattr(p, "cache", None)
             if not cache:
                 continue

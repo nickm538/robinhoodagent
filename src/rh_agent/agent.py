@@ -80,18 +80,25 @@ class TradingAgent:
         every tick so stop-loss checks never evaluate against a stale, frozen price."""
         self._quote_cache.clear()
 
-    def universe(self, limit: int | None = None, watchlist: list[str] | None = None) -> list[str]:
+    def universe(self, limit: int | None = None, watchlist: list[str] | None = None,
+                 include_tickers: list[str] | None = None) -> list[str]:
         # explicit --tickers (even if empty) overrides config universe.watchlist;
         # only fall back to config when no watchlist was passed at all.
         wl = watchlist if watchlist is not None else (self.cfg.get("universe.watchlist") or [])
         if wl:
             tickers = [t.strip().upper() for t in wl if t and t.strip()]
-            return tickers[:limit] if limit else tickers
-        if "snapshot" in self.providers:
+        elif "snapshot" in self.providers:
             tickers = self.providers["snapshot"].list_universe()
         else:
             from .data.universe import build_universe
             tickers = build_universe(self.md, self.cfg)
+        if include_tickers:
+            seen = set(tickers)
+            for t in include_tickers:
+                tk = t.strip().upper() if isinstance(t, str) else ""
+                if tk and tk not in seen:
+                    tickers.append(tk)
+                    seen.add(tk)
         return tickers[:limit] if limit else tickers
 
     def _gather(self, tickers: list[str], deep: bool = True) -> list[TickerData]:
@@ -119,10 +126,10 @@ class TradingAgent:
 
     # ---- scan & score ----
     def scan(self, equity: float | None = None, limit: int | None = None,
-             tickers: list[str] | None = None) -> ScanResult:
+             tickers: list[str] | None = None, include_tickers: list[str] | None = None) -> ScanResult:
         if equity is None:                 # 0.0 is a valid (empty-account) sizing -> keep it
             equity = self.default_equity()
-        names = self.universe(limit, watchlist=tickers)
+        names = self.universe(limit, watchlist=tickers, include_tickers=include_tickers)
         full_n = len(names)
         regime = detect_regime(self.md, self.cfg)
 
@@ -239,7 +246,8 @@ class TradingAgent:
             return RunResult(scan=empty, account=account, orders=[], fills=[], executed=False,
                              mode="live")
         equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
-        scan = self.scan(equity=equity, tickers=tickers)
+        held_tickers = [p.ticker for p in account.positions]
+        scan = self.scan(equity=equity, tickers=tickers, include_tickers=held_tickers)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
                               allow_buys=allow_buys, exclude_tickers=exclude_tickers)
 

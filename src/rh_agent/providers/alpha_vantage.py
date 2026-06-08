@@ -64,6 +64,10 @@ class AlphaVantageProvider(DataProvider):
                      day_change_pct=_num((g.get("10. change percent") or "0").rstrip("%")),
                      source=self.name)
 
+    def invalidate_quote(self, ticker: str) -> None:
+        key = f"{sorted({'function': 'GLOBAL_QUOTE', 'symbol': ticker}.items())}"
+        self.cache._path("av/quote", key).unlink(missing_ok=True)
+
     def get_prices(self, ticker: str, start: str | None = None, end: str | None = None,
                    interval: str = "day") -> pd.DataFrame:
         fn = {"day": "TIME_SERIES_DAILY_ADJUSTED", "week": "TIME_SERIES_WEEKLY_ADJUSTED",
