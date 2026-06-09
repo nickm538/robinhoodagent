@@ -56,7 +56,8 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
         if not px:
             continue
         cur_w = (cur[tk].quantity * px) / equity if tk in cur else 0.0
-        if (t.weight - cur_w) <= band:
+        trade_band = entry_band if tk not in cur else band
+        if (t.weight - cur_w) <= trade_band:
             continue
         buy_dollars = (t.weight - cur_w) * equity
         if buy_dollars < min_notional:

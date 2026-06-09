@@ -100,7 +100,7 @@ class MarketData:
         if not tickers:
             return 0
         self.clear_quote_prefetch()
-        warmed = self.prefetch_quotes(tickers)
+        prefetched = self.prefetch_quotes(tickers)
         fresh = 0
         for t in tickers:
             q = self.get_quote_for_risk(t, max_age_seconds=max_age_seconds)
@@ -108,7 +108,10 @@ class MarketData:
                 self._quote_prefetch[t.upper()] = q
                 fresh += 1
         if fresh:
-            log.info("refreshed %d/%d live quotes before scoring", fresh, len(tickers))
+            log.info(
+                "refreshed %d/%d live quotes before scoring (prefetched=%d)",
+                fresh, len(tickers), prefetched
+            )
         return fresh
 
     def get_quote(self, t: str) -> Quote | None:

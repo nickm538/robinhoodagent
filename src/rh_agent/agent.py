@@ -474,7 +474,7 @@ class TradingAgent:
                                   scan: ScanResult, account: Account) -> bool:
         """Sell a stale hold when a materially stronger fresh runner is in the book."""
         hunter = self.cfg.get("hunter", {}) or {}
-        if not hunter.get("rotation_enabled", True):
+        if not hunter.get("rotation_enabled", False):
             return False
         held = {p.ticker for p in account.positions}
         if ticker not in held:

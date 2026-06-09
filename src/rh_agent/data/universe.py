@@ -207,10 +207,11 @@ def build_universe(md: MarketData, cfg: Config, raw: list[str] | None = None) ->
         # momentum — so runners actually reach the deep-score funnel.
         if intraday_cfg.get("enabled", False):
             passed.sort(key=lambda c: (c.intraday_score, c.day_change_pct, c.mom_63), reverse=True)
+            passed = passed[: pre.get("max_candidates", 250)]
             log.info("prescreen kept top %d by intraday opportunity score", len(passed))
         else:
             passed.sort(key=lambda c: c.mom_63, reverse=True)
+            passed = passed[: pre.get("max_candidates", 250)]
             log.info("prescreen kept top %d by 3-month momentum", len(passed))
-        passed = passed[: pre.get("max_candidates", 250)]
 
     return [c.ticker for c in passed]
