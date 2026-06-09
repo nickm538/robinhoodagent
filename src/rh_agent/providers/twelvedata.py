@@ -83,7 +83,12 @@ class TwelveDataProvider(DataProvider):
         vals = d.get("values") if isinstance(d, dict) else None
         if not vals:
             raise ProviderUnsupported
-        df = prices_to_df([{"time": v["datetime"], **v} for v in vals])
+        recs = []
+        for v in vals:
+            rec = {k: val for k, val in v.items() if k != "datetime"}
+            rec["time"] = v.get("datetime")
+            recs.append(rec)
+        df = prices_to_df(recs)
         if start:
             df = df[df.index >= pd.to_datetime(start)]
         if end:

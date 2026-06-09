@@ -96,6 +96,24 @@ def test_twelvedata_quote_and_invalidation_use_us_symbol_key():
     assert "United States" in p.cache.key
 
 
+def test_twelvedata_prices_normalize_datetime_without_duplicate_time_column():
+    import rh_agent.providers.twelvedata as td
+
+    p = td.TwelveDataProvider.__new__(td.TwelveDataProvider)
+    p._q = lambda section, ttl, path, params: {
+        "values": [
+            {"datetime": "2026-06-06", "open": "10", "high": "11",
+             "low": "9", "close": "10.5", "volume": "1000"},
+            {"datetime": "2026-06-09", "open": "11", "high": "12",
+             "low": "10", "close": "11.5", "volume": "1200"},
+        ]
+    }
+    prices = p.get_prices("AAPL")
+    assert list(prices.columns) == ["open", "high", "low", "close", "adj_close", "volume"]
+    assert len(prices) == 2
+    assert prices["close"].iloc[-1] == 11.5
+
+
 def test_twelvedata_technicals_use_current_indicator_endpoints():
     import rh_agent.providers.twelvedata as td
 
