@@ -85,3 +85,28 @@ def test_web_headlines_merge_firecrawl_and_exa_snippets():
         "AAPL launches new chip",
         "Analysts discuss AAPL demand",
     ]
+
+
+def test_web_snippets_use_http_client_post_json_helpers():
+    class _Client:
+        timeout = 20
+
+        def __init__(self, payload):
+            self.payload = payload
+            self.calls = []
+
+        def post_json(self, path, payload):
+            self.calls.append((path, payload))
+            return self.payload
+
+    p = WebResearchProvider.__new__(WebResearchProvider)
+    p.fc = _Client({"data": [{"title": "FC title", "markdown": "FC body", "url": "u"}]})
+    p.exa = _Client({"results": [{"title": "EXA title", "text": "EXA body", "url": "e"}]})
+    p.exa_recency_days = 3
+
+    assert p._firecrawl_snippets("AAPL news", 2)[0]["source"] == "firecrawl"
+    assert p.fc.calls[0][0] == "/v1/search"
+    exa = p._exa_snippets("AAPL news", 2)
+    assert exa[0]["source"] == "exa"
+    assert p.exa.calls[0][0] == "/search"
+    assert "startPublishedDate" in p.exa.calls[0][1]

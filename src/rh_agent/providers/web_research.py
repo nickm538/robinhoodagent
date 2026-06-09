@@ -76,15 +76,13 @@ class WebResearchProvider(DataProvider):
     def _firecrawl_snippets(self, query: str, limit: int) -> list[dict[str, str]]:
         if self.fc is not None:
             try:
-                r = self.fc.session.post(
-                    f"{FIRECRAWL}/v1/search",
-                    json={"query": query, "limit": limit,
-                          "scrapeOptions": {"formats": ["markdown"]}},
-                    timeout=self.fc.timeout)
-                if not r.ok:
-                    return []
+                data = self.fc.post_json(
+                    "/v1/search",
+                    {"query": query, "limit": limit,
+                     "scrapeOptions": {"formats": ["markdown"]}},
+                )
                 out: list[dict[str, str]] = []
-                for item in (r.json().get("data") or []):
+                for item in (data.get("data") or []):
                     title = (item.get("title") or item.get("metadata", {}).get("title") or "").strip()
                     body = (item.get("markdown") or item.get("description") or "").strip()
                     url = (item.get("url") or item.get("metadata", {}).get("sourceURL") or "").strip()
@@ -105,14 +103,9 @@ class WebResearchProvider(DataProvider):
                 }
                 if recency:
                     payload["startPublishedDate"] = self._exa_start_date()
-                r = self.exa.session.post(
-                    f"{EXA}/search",
-                    json=payload,
-                    timeout=self.exa.timeout)
-                if not r.ok:
-                    return []
+                data = self.exa.post_json("/search", payload)
                 out: list[dict[str, str]] = []
-                for item in (r.json().get("results") or []):
+                for item in (data.get("results") or []):
                     title = (item.get("title") or "").strip()
                     body = (item.get("text") or "").strip()
                     url = (item.get("url") or "").strip()

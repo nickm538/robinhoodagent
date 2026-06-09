@@ -118,6 +118,26 @@ class HttpClient:
                 time.sleep(min(2 ** attempt, 8))
         raise ProviderError(f"GET {url} failed after {retries} tries: {last_err}")
 
+    def post_json(self, path: str, payload: dict | None = None, *, headers: dict | None = None,
+                  retries: int = 3) -> Any:
+        if OFFLINE:
+            raise ProviderError("RH_OFFLINE set: refusing live HTTP request")
+        url = path if path.startswith("http") else f"{self.base_url}/{path.lstrip('/')}"
+        last_err: Exception | None = None
+        for attempt in range(retries):
+            self.limiter.wait()
+            try:
+                r = self.session.post(url, json=payload, headers=headers, timeout=self.timeout)
+                if r.status_code == 429:
+                    time.sleep(2 ** attempt)
+                    continue
+                r.raise_for_status()
+                return r.json()
+            except Exception as e:  # network / decode
+                last_err = e
+                time.sleep(min(2 ** attempt, 8))
+        raise ProviderError(f"POST {url} failed after {retries} tries: {last_err}")
+
 
 class DataProvider:
     """Interface. Subclasses implement whichever sections they support."""
