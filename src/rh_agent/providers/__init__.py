@@ -43,7 +43,8 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
     fc_key, exa_key = cfg.api_key("firecrawl"), cfg.api_key("exa")
     if fc_key or exa_key:
         from .web_research import WebResearchProvider
-        web = WebResearchProvider(fc_key, exa_key, cache)
+        web = WebResearchProvider(fc_key, exa_key, cache,
+                                  settings=cfg.get("web_research", {}) or {})
         if web.enabled:
             providers["web"] = web
 

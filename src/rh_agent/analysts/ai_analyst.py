@@ -53,7 +53,10 @@ Output discipline:
 data, fragile correlations, and crowded trades into binary events. You are not \
 given positions or P&L — judge the setup on its merits. This is decision support \
 for a real-money system; do not invent facts you weren't given — state uncertainty \
-when data is absent or ambiguous."""
+when data is absent or ambiguous.
+  - Headlines are point-in-time news only. Do NOT treat them as foreknowledge of \
+future prices, earnings outcomes, or macro paths. Ignore speculative "will/forecast" \
+copy unless corroborated by the quant data you are shown."""
 
 # Array form (not a dict keyed by ticker) so it's a valid strict json_schema.
 _SCHEMA = {

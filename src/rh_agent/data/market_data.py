@@ -210,26 +210,41 @@ class MarketData:
 
     # ---- news headlines (for the AI analyst) ----
     def headlines(self, ticker: str, limit: int = 6) -> list:
-        for p in self.providers.values():
-            if hasattr(p, "get_headlines"):
-                try:
-                    h = p.get_headlines(ticker, limit)
-                    if h:
-                        return h
-                except Exception:
-                    continue
-        return []
+        """Merge headlines from configured providers (API first, web enriches)."""
+        order = self._order("news_headlines") or ["alphavantage", "web"]
+        out: list[str] = []
+        for name in order:
+            p = self.providers.get(name)
+            fn = getattr(p, "get_headlines", None) if p else None
+            if fn is None:
+                continue
+            try:
+                for h in fn(ticker, limit):
+                    if h and h not in out:
+                        out.append(h)
+            except Exception as e:
+                log.debug("%s headlines(%s) failed: %s", name, ticker, e)
+            if len(out) >= limit:
+                break
+        return out[:limit]
 
     def market_news(self, limit: int = 8) -> str:
-        for p in self.providers.values():
-            if hasattr(p, "get_headlines"):
-                try:
-                    h = p.get_headlines(None, limit)
-                    if h:
-                        return " | ".join(h)
-                except Exception:
-                    continue
-        return ""
+        order = self._order("news_headlines") or ["alphavantage", "web"]
+        out: list[str] = []
+        for name in order:
+            p = self.providers.get(name)
+            fn = getattr(p, "get_headlines", None) if p else None
+            if fn is None:
+                continue
+            try:
+                for h in fn(None, limit):
+                    if h and h not in out:
+                        out.append(h)
+            except Exception as e:
+                log.debug("%s market headlines failed: %s", name, e)
+            if len(out) >= limit:
+                break
+        return " | ".join(out[:limit])
 
     # ---- full assembly ----
     def build(self, ticker: str, *, deep: bool = True,
@@ -267,11 +282,19 @@ class MarketData:
             td.options = self._try("options_flow", "get_options", ticker) or {}
             td.earnings = self._try("fundamentals", "get_earnings", ticker) or \
                 self._try("news_sentiment", "get_earnings", ticker) or {}
-            td.pro_scores = self._pro_scores(ticker, td.company.get("name")) or {}
+            # Web research (Firecrawl/Exa) runs only on deep names — never the intraday light pass.
+            if self._web_research_enabled():
+                td.pro_scores = self._pro_scores(ticker, td.company.get("name")) or {}
 
         td.meta = {"captured_at": utcnow().isoformat(),
                    "has_prices": td.prices is not None and len(td.prices) > 0}
         return td
+
+    def _web_research_enabled(self) -> bool:
+        wr = self.cfg.get("web_research", {}) or {}
+        if wr.get("enabled", True) is False:
+            return False
+        return "web" in self.providers
 
     def _pro_scores(self, ticker: str, name: str | None) -> dict:
         for pname in self._order("pro_scores"):

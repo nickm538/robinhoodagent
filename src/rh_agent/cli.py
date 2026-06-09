@@ -47,27 +47,39 @@ def cmd_doctor(args) -> int:
              "mboum": "https://api.mboum.com", "alphavantage": "https://www.alphavantage.co",
              "twelvedata": "https://api.twelvedata.com", "firecrawl": "https://api.firecrawl.dev",
              "robinhood": "https://agent.robinhood.com/mcp/trading"}
-    for name, url in hosts.items():
+    def _check_host(name: str, url: str) -> str:
         try:
             if name == "twelvedata":
                 key = cfg.api_key("twelvedata")
                 if key:
                     r = requests.get(f"{url}/price",
-                                       params={"symbol": "SPY", "apikey": key}, timeout=8)
-                else:
-                    r = requests.get(url, timeout=6)
-            else:
+                                     params={"symbol": "SPY", "apikey": key}, timeout=8)
+                    if r.status_code == 200:
+                        body = r.json()
+                        if body.get("status") != "error" and body.get("price") is not None:
+                            return "✓"
+                return f"HTTP {r.status_code}" if key else "— (missing)"
+            if name == "firecrawl":
+                key = cfg.api_key("firecrawl")
+                if not key:
+                    return "— (missing)"
                 r = requests.get(url, timeout=6)
-            ok = r.status_code == 200
-            if name == "twelvedata" and r.status_code == 200:
-                try:
-                    body = r.json()
-                    ok = body.get("status") != "error" and body.get("price") is not None
-                except Exception:
-                    ok = False
-            print(f"  {name:18} {'✓' if ok else f'HTTP {r.status_code}'}")
+                return "✓" if r.status_code < 500 else f"HTTP {r.status_code}"
+            if name == "exa":
+                key = cfg.api_key("exa")
+                if not key:
+                    return "— (missing)"
+                r = requests.post(f"{url}/search",
+                                  headers={"x-api-key": key, "Content-Type": "application/json"},
+                                  json={"query": "SPY stock", "numResults": 1}, timeout=10)
+                return "✓" if r.status_code == 200 else f"HTTP {r.status_code}"
+            r = requests.get(url, timeout=6)
+            return "✓" if r.status_code < 500 else f"HTTP {r.status_code}"
         except Exception as e:
-            print(f"  {name:18} unreachable ({type(e).__name__})")
+            return f"unreachable ({type(e).__name__})"
+
+    for name, url in hosts.items():
+        print(f"  {name:18} {_check_host(name, url)}")
     print("\nIf hosts show 'Host not in allowlist', add them to your Claude Code web "
           "environment's network egress policy (see README → Connectivity).")
     return 0

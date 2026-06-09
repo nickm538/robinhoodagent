@@ -122,6 +122,26 @@ class AlphaVantageProvider(DataProvider):
             "source": self.name,
         }
 
+    def get_headlines(self, ticker: str | None = None, limit: int = 8) -> list:
+        """Headline titles from the NEWS_SENTIMENT feed (point-in-time articles)."""
+        params = {"function": "NEWS_SENTIMENT", "limit": min(limit, 50)}
+        if ticker:
+            params["tickers"] = ticker
+        else:
+            params["topics"] = "financial_markets"
+        d = self._q("news", 120, params)
+        feed = d.get("feed", []) if isinstance(d, dict) else []
+        out: list[str] = []
+        for art in feed:
+            title = art.get("title") if isinstance(art, dict) else None
+            if title and title not in out:
+                out.append(title[:200])
+            if len(out) >= limit:
+                break
+        if not out:
+            raise ProviderUnsupported
+        return out
+
     def get_news_sentiment(self, ticker: str) -> dict:
         d = self._q("news", 120, {"function": "NEWS_SENTIMENT", "tickers": ticker, "limit": 200})
         feed = d.get("feed", []) if isinstance(d, dict) else []

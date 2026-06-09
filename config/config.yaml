@@ -41,11 +41,12 @@ providers:
   technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "mboum"]
+  news_sentiment: ["alphavantage", "mboum", "web"]   # web last — keyword fallback only
+  news_headlines: ["alphavantage", "web"]            # API headlines + Exa/Firecrawl for AI analyst
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
   options_flow:   ["alphavantage", "mboum"]
-  pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
+  pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks (deep names only)
   macro:          ["alphavantage"]
   # Universe/discovery: mboum paginated listing for the base set.
   # Movers: Alpha Vantage TOP_GAINERS_LOSERS (cheap) + TwelveData gainers (Pro, merged).
@@ -254,6 +255,22 @@ portfolio:
 # ----------------------------------------------------------------------
 # BACKTEST  — walk-forward, real prices, vs benchmark.
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# WEB RESEARCH  — Firecrawl + Exa (deep-scored names only; no intraday light pass).
+# Pro-source ratings + headline enrichment for the AI analyst. Sentiment web
+# fallback is last in news_sentiment chain with noise gates (min hits, recency).
+# ----------------------------------------------------------------------
+web_research:
+  enabled: true
+  combine_engines: true          # merge Firecrawl scrape + Exa neural search (not fallback-only)
+  max_search_results: 5
+  max_chars_per_search: 8000
+  exa_recency_days: 3            # look-ahead guard: only recent published web results
+  min_sentiment_hits: 4          # omit thin keyword-sentiment (factor neutralises)
+  pro_scores_ttl_minutes: 720
+  headlines_ttl_minutes: 60
+  sentiment_ttl_minutes: 120
+
 # ----------------------------------------------------------------------
 # AI ANALYST  — the 6th, LLM-in-the-loop voice (Claude). Optional.
 # Once per rebalance it reviews the shortlist + market news and reasons about
