@@ -26,22 +26,19 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL + PAID DATA ROUTING: FinancialDatasets.AI is removed from the
-  # high-frequency quote/prices/fundamentals lists where it was dominating API
-  # spend once the universe widened. TwelveData is first for live quotes and
-  # price history because the deployment has a paid account; MBOUM remains the
-  # primary fundamentals/listing source, while Alpha Vantage fills unique gaps
-  # (news, macro, cheap movers). Re-add "financialdatasets" to any list below to
-  # use it again.
-  fundamentals:   ["mboum", "alphavantage"]
-  prices:         ["twelvedata", "mboum", "alphavantage"]
-  quote:          ["twelvedata", "mboum", "alphavantage"]
-  quote_risk:     ["twelvedata", "mboum", "alphavantage"]
+  # PAID DATA ROUTING: FinancialDatasets.AI is the preferred primary source
+  # wherever it has coverage, with MBOUM as the next paid fallback and
+  # TwelveData retained as a tertiary backup for quote/price continuity.
+  # Alpha Vantage still fills cheaper niche gaps (news, macro, movers).
+  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
+  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  quote:          ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  quote_risk:     ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
   technicals:     ["twelvedata", "mboum", "alphavantage"]   # computed locally first; provider values enrich gaps
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "mboum", "web"]  # web is last resort and disabled unless explicitly enabled
-  news_headlines: ["alphavantage", "web"]           # structured API first, web only enriches AI context
+  news_sentiment: ["financialdatasets", "alphavantage", "mboum", "web"]  # web is last resort and disabled unless explicitly enabled
+  news_headlines: ["financialdatasets", "alphavantage", "web"]           # structured APIs first, web only enriches AI context
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
   options_flow:   ["alphavantage", "mboum"]
