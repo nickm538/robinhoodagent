@@ -159,9 +159,13 @@ class FinancialDatasetsProvider(DataProvider):
                 "net_change_pct": (delta / total_shares) if total_shares else None,
                 "source": self.name}
 
+    # The live /news/ endpoint rejects limit > 10 with HTTP 400 ("Invalid limit").
+    _NEWS_LIMIT_CAP = 10
+
     def get_headlines(self, ticker: str | None = None, limit: int = 8) -> list:
         """Recent headlines for a ticker, or broad-market news when ticker is None."""
-        params = {"limit": limit}
+        capped = min(limit, self._NEWS_LIMIT_CAP)
+        params = {"limit": capped}
         if ticker:
             params["ticker"] = ticker
         d = self._cached("news", ticker or "_market", 120, "/news/", params)
@@ -170,11 +174,12 @@ class FinancialDatasetsProvider(DataProvider):
                 if isinstance(it, dict) and (it.get("title") or it.get("headline"))]
 
     def get_news_sentiment(self, ticker: str) -> dict:
-        d = self._cached("news", ticker, 120, "/news/", {"ticker": ticker, "limit": 50})
+        d = self._cached("news", ticker, 120, "/news/",
+                         {"ticker": ticker, "limit": self._NEWS_LIMIT_CAP})
         items = d.get("news", d) if isinstance(d, dict) else d
         if not items:
             raise ProviderUnsupported
-        # FinancialDatasets news has a 'sentiment' label per article on many tickers.
+        # Some plans label articles with a 'sentiment'; count them when present.
         score, n = 0.0, 0
         for it in items:
             s = (it.get("sentiment") or "").lower()
@@ -186,5 +191,8 @@ class FinancialDatasetsProvider(DataProvider):
                 n += 1
             elif s in ("neutral",):
                 n += 1
-        return {"score": (score / n) if n else None, "article_count": len(items),
-                "source": self.name}
+        if n == 0:
+            # No sentiment labels on this plan/ticker: defer to the next provider
+            # instead of returning a scoreless dict that would block the chain.
+            raise ProviderUnsupported
+        return {"score": score / n, "article_count": len(items), "source": self.name}

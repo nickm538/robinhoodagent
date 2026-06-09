@@ -37,3 +37,51 @@ def test_twelvedata_stays_complementary_not_primary():
         assert "twelvedata" in chain, f"{section}: twelvedata missing from {chain}"
         assert chain[0] != "twelvedata", (
             f"{section}: twelvedata must be complementary, not primary ({chain})")
+
+
+# ---- FinancialDatasets /news/ quirks (live API caps limit at 10) ----
+
+def _fd_with_news(monkeypatch, items):
+    from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
+    fd = FinancialDatasetsProvider.__new__(FinancialDatasetsProvider)
+    seen = {}
+
+    def fake_cached(section, ticker, ttl, path, params):
+        seen.update(params)
+        return {"news": items}
+
+    monkeypatch.setattr(fd, "_cached", fake_cached)
+    return fd, seen
+
+
+def test_fd_news_limit_capped_at_10(monkeypatch):
+    fd, seen = _fd_with_news(monkeypatch, [{"title": f"h{i}"} for i in range(10)])
+    fd.get_headlines("AAPL", limit=50)
+    assert seen["limit"] <= 10
+    seen.clear()
+    try:
+        fd.get_news_sentiment("AAPL")
+    except Exception:
+        pass
+    assert seen["limit"] <= 10
+
+
+def test_fd_sentiment_defers_when_articles_unlabeled(monkeypatch):
+    import pytest
+
+    from rh_agent.providers.base import ProviderUnsupported
+    fd, _ = _fd_with_news(monkeypatch, [{"title": "no label"}] * 5)
+    with pytest.raises(ProviderUnsupported):
+        fd.get_news_sentiment("AAPL")
+
+
+def test_fd_sentiment_scores_labeled_articles(monkeypatch):
+    fd, _ = _fd_with_news(monkeypatch, [
+        {"title": "a", "sentiment": "positive"},
+        {"title": "b", "sentiment": "positive"},
+        {"title": "c", "sentiment": "negative"},
+        {"title": "d", "sentiment": "neutral"},
+    ])
+    out = fd.get_news_sentiment("AAPL")
+    assert out["score"] == 0.25
+    assert out["article_count"] == 4
