@@ -8,6 +8,7 @@ import math
 from dataclasses import dataclass
 
 from ..config import Config
+from ..debug_log import write_debug_log
 from ..logging_setup import get_logger
 from .market_data import MarketData
 
@@ -110,14 +111,32 @@ def _apply_intraday_radar(candidates: list[Candidate], cfg: Config) -> list[Cand
         if price_runner or volume_runner or breakout_runner:
             scored.append(c)
 
+    fallback_used = False
     if len(scored) < min_candidates and fallback:
         log.warning("intraday radar found %d candidates (<%d); using liquid universe fallback",
                     len(scored), min_candidates)
         scored = candidates
+        fallback_used = True
 
     scored.sort(key=lambda c: (c.intraday_score, c.day_change_pct, c.rel_volume), reverse=True)
     kept = scored[:max_candidates]
     log.info("intraday radar kept %d/%d candidates", len(kept), len(candidates))
+    # region agent log
+    write_debug_log(
+        hypothesis_id="B",
+        location="data/universe.py:120",
+        message="intraday radar outcome",
+        data={
+            "candidate_count": len(candidates),
+            "runner_count": len(scored),
+            "kept_count": len(kept),
+            "fallback_used": fallback_used,
+            "min_candidates": min_candidates,
+            "use_movers_feed": bool(intraday.get("use_movers_feed", True)),
+            "sample_kept": [c.ticker for c in kept[:8]],
+        },
+    )
+    # endregion
     return kept
 
 

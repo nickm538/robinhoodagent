@@ -5,6 +5,7 @@ ATR-based protective stops.
 from __future__ import annotations
 
 from .config import Config
+from .debug_log import write_debug_log
 from .logging_setup import get_logger
 from .models import TargetPosition, TickerData, Verdict
 from .regime import RegimeResult
@@ -72,6 +73,7 @@ class PortfolioBuilder:
         # ---- 4b) cap each name by stop-distance risk budget ----
         rc = self.p.get("risk_controls", {})
         risk_pct = float(rc.get("per_trade_risk_pct", 0.0) or 0.0)
+        risk_capped: list[str] = []
         if risk_pct > 0:
             atr_mult = float(rc.get("stop_loss_atr_mult", 2.5))
             hard_pct = float(rc.get("hard_stop_pct", 0.18))
@@ -84,9 +86,13 @@ class PortfolioBuilder:
                     continue
                 stop = atr_stop(px, td.technicals.get("atr"), atr_mult, hard_pct)
                 capped[t] = risk_capped_weight(px, stop, w, risk_pct)
+                if capped[t] + 1e-9 < w:
+                    risk_capped.append(t)
             weights = capped
+        post_risk_weights = dict(weights)
         # ---- 5) drop dust positions (their weight becomes cash) ----
         weights = {t: w for t, w in weights.items() if w >= min_w * 0.5}
+        dust_dropped = sorted(set(post_risk_weights) - set(weights))
 
         # ---- 6) materialise target positions w/ stops ----
         out: list[TargetPosition] = []
@@ -111,6 +117,26 @@ class PortfolioBuilder:
             )
             out.append(tp)
         out.sort(key=lambda x: x.weight, reverse=True)
+        # region agent log
+        write_debug_log(
+            hypothesis_id="E",
+            location="portfolio.py:114",
+            message="portfolio sizing summary",
+            data={
+                "eligible_count": len(eligible),
+                "selected_count": len(selected),
+                "target_count": len(out),
+                "risk_pct": risk_pct,
+                "risk_capped_count": len(risk_capped),
+                "risk_capped": risk_capped[:8],
+                "dust_dropped_count": len(dust_dropped),
+                "dust_dropped": dust_dropped[:8],
+                "invested_weight": round(sum(x.weight for x in out), 4),
+                "min_weight": round(min((x.weight for x in out), default=0.0), 4),
+                "max_weight": round(max((x.weight for x in out), default=0.0), 4),
+            },
+        )
+        # endregion
         log.info("portfolio: %d positions, %.0f%% invested (%s regime)",
                  len(out), 100 * sum(x.weight for x in out), regime.name)
         return out

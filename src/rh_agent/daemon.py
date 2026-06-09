@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover
 from .agent import TradingAgent
 from .broker.orders import order_succeeded
 from .config import REPO_ROOT, Config, write_private
+from .debug_log import write_debug_log
 from .journal import Journal
 from .logging_setup import get_logger
 from .market_calendar import is_market_open
@@ -186,6 +187,28 @@ class AlwaysOnAgent:
         # 1) risk management on open positions — EVERY tick, never blocked by a scan
         risk_actions = self._manage_risk(broker, account, execute)
         pending = set(self.state.pending_risk.keys())
+        due_for_rebalance = self._due_for_rebalance(now)
+        scan_age_s = None
+        if self._scan_started_at is not None:
+            scan_age_s = round((now - self._scan_started_at).total_seconds(), 1)
+        # region agent log
+        write_debug_log(
+            hypothesis_id="A",
+            location="daemon.py:190",
+            message="tick cadence state",
+            data={
+                "due_for_rebalance": due_for_rebalance,
+                "halted": halted,
+                "risk_actions": sorted(risk_actions),
+                "pending_risk_count": len(pending),
+                "positions": len(account.positions),
+                "has_scan_future": self._scan_future is not None,
+                "has_pending_scan": self._pending_scan is not None,
+                "scan_age_s": scan_age_s,
+                "last_rebalance": self.state.last_rebalance or None,
+            },
+        )
+        # endregion
 
         # 2) harvest a finished background scan, or abandon a stuck one (watchdog)
         if self._scan_future is not None:
@@ -222,7 +245,7 @@ class AlwaysOnAgent:
                 broker=broker, account=account)
             self._apply_rebalance_result(run, account)
         # 4) otherwise, kick off a new scan when due (and none is in flight/pending)
-        elif (self._due_for_rebalance(now) and self._scan_future is None
+        elif (due_for_rebalance and self._scan_future is None
               and self._pending_scan is None and not risk_actions):
             equity = account.equity if (account.equity and account.equity > 0) \
                 else self.agent.default_equity()

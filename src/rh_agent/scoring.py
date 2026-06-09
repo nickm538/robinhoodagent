@@ -7,6 +7,7 @@ import pandas as pd
 
 from .analysts.panel import Panel
 from .config import Config
+from .debug_log import write_debug_log
 from .factors.library import FACTORS, compute_raw_factors
 from .factors.normalize import cross_sectional_scores
 from .logging_setup import get_logger
@@ -104,14 +105,29 @@ class Scorer:
         block_high_vol = bool(rc.get("block_high_volatility", False))
         block_stale_quote = bool(rc.get("block_stale_quote", True))
         out = []
+        rejected = {
+            "low_confidence": 0,
+            "low_pillars": 0,
+            "ai_caution": 0,
+            "high_volatility": 0,
+            "stale_quote": 0,
+            "earnings": 0,
+        }
         for v in verdicts:
-            if v.composite < min_conf or v.pillars_passing < min_pillars:
+            if v.composite < min_conf:
+                rejected["low_confidence"] += 1
+                continue
+            if v.pillars_passing < min_pillars:
+                rejected["low_pillars"] += 1
                 continue
             if block_ai and "ai_caution" in v.flags:
+                rejected["ai_caution"] += 1
                 continue
             if block_high_vol and "high_volatility" in v.flags:
+                rejected["high_volatility"] += 1
                 continue
             if block_stale_quote and "stale_quote" in v.flags:
+                rejected["stale_quote"] += 1
                 continue
             if block_earnings_days > 0:
                 blocked = False
@@ -125,8 +141,23 @@ class Scorer:
                         except ValueError:
                             pass
                 if blocked:
+                    rejected["earnings"] += 1
                     continue
             out.append(v)
         log.info("eligible: %d/%d names clear conviction>=%.0f & pillars>=%d (flags applied)",
                  len(out), len(verdicts), min_conf, min_pillars)
+        # region agent log
+        write_debug_log(
+            hypothesis_id="C",
+            location="scoring.py:130",
+            message="eligibility gate summary",
+            data={
+                "total_verdicts": len(verdicts),
+                "passed": len(out),
+                "min_confidence": min_conf,
+                "min_pillars": min_pillars,
+                "rejected": rejected,
+            },
+        )
+        # endregion
         return out
