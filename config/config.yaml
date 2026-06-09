@@ -26,29 +26,32 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL + PAID DATA ROUTING: FinancialDatasets.AI is removed from the
-  # high-frequency quote/prices/fundamentals lists where it was dominating API
-  # spend once the universe widened. TwelveData is first for live quotes and
-  # price history because the deployment has a paid account; MBOUM remains the
-  # primary fundamentals/listing source, while Alpha Vantage fills unique gaps
-  # (news, macro, cheap movers). Re-add "financialdatasets" to any list below to
-  # use it again.
-  fundamentals:   ["mboum", "alphavantage"]
-  prices:         ["twelvedata", "mboum", "alphavantage"]
-  quote:          ["twelvedata", "mboum", "alphavantage"]
-  quote_risk:     ["twelvedata", "mboum", "alphavantage"]
-  technicals:     ["twelvedata", "mboum", "alphavantage"]   # computed locally first; provider values enrich gaps
-  insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
-  institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "mboum", "web"]  # web is last resort and disabled unless explicitly enabled
-  news_headlines: ["alphavantage", "web"]           # structured API first, web only enriches AI context
+  # MANDATE ROUTING: FinancialDatasets.AI is the PRIMARY source everywhere it is
+  # capable (paid plan); Mboum (pro plan) sits right behind it and owns the
+  # sections FD lacks (listing, analyst, short interest, provider technicals).
+  # TwelveData is COMPLEMENTARY: batch quote prefetch for the intraday radar,
+  # quote/price fallback, and technicals enrichment. Alpha Vantage fills unique
+  # gaps (structured news sentiment, macro, cheap movers feed).
+  # Cost note: the radar's high-frequency quote reads are served mostly by the
+  # TwelveData batch prefetch cache; FD/Mboum are hit per-name only when the
+  # prefetch is missing or stale, which keeps FD-first routing affordable.
+  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
+  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  quote:          ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  quote_risk:     ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  technicals:     ["mboum", "twelvedata", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
+  insider:        ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (720m TTL)
+  institutional:  ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (1440m TTL)
+  news_sentiment: ["alphavantage", "financialdatasets", "mboum", "web"]  # AV first (structured scores); web is opt-in last resort
+  news_headlines: ["financialdatasets", "alphavantage", "web"]           # FD news primary; AV enriches; web only adds AI context
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
   options_flow:   ["alphavantage", "mboum"]
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
   macro:          ["alphavantage"]
-  # Universe/discovery: mboum paginated listing for the base set; Alpha Vantage
-  # TOP_GAINERS_LOSERS for the intraday movers feed (mboum has no movers endpoint).
+  # Universe/discovery: mboum (pro) paginated listing for the base set; Alpha
+  # Vantage TOP_GAINERS_LOSERS for the intraday movers feed (FD/mboum have no
+  # movers endpoint).
   universe:       ["mboum", "twelvedata", "alphavantage"]
   movers:         ["alphavantage", "twelvedata"]
   # TwelveData paid-plan tuning. Check your dashboard and set
