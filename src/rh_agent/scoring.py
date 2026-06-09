@@ -3,6 +3,8 @@ normalisation -> panel verdicts. This is where the universe is ranked.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pandas as pd
 
 from .analysts.panel import Panel
@@ -67,7 +69,19 @@ class Scorer:
         max_quote_age = float(freshness.get("quote_max_age_seconds", 120))
         max_prices_age_days = float(freshness.get("prices_max_age_days", 5))
         if td.quote is not None:
-            age = (utcnow() - td.quote.asof).total_seconds()
+            # Measure DATA staleness at the moment the ticker was built, not at
+            # scoring time. A multi-minute scan (deep gather + web research + AI
+            # overlay) must not age its own candidates into stale_quote vetoes —
+            # that starves the buy list down to the held book. Order sizing
+            # re-fetches fresh quotes at execution time regardless.
+            ref = utcnow()
+            captured = (td.meta or {}).get("captured_at")
+            if captured:
+                try:
+                    ref = datetime.fromisoformat(str(captured))
+                except ValueError:
+                    pass
+            age = (ref - td.quote.asof).total_seconds()
             if age > max_quote_age:
                 v.flags.append("stale_quote")
         if td.prices is not None and len(td.prices):

@@ -16,9 +16,12 @@ from typing import Any
 
 import pandas as pd
 
+from ..logging_setup import get_logger
 from ..models import Quote
 from .base import (DataProvider, DiskCache, HttpClient, OFFLINE,
                    ProviderError, ProviderUnsupported, prices_to_df)
+
+log = get_logger("alphavantage")
 
 BASE = "https://www.alphavantage.co"
 
@@ -35,20 +38,32 @@ def _num(x: Any) -> float | None:
 class AlphaVantageProvider(DataProvider):
     name = "alphavantage"
 
+    # Once AV reports it is throttled (per-minute or daily quota), every further
+    # call would still burn the 1 req/s rate-limiter wait across a whole scan.
+    # Trip a cooldown and fail fast so the fallback chain answers immediately.
+    THROTTLE_COOLDOWN_SECONDS = 600.0
+
     def __init__(self, api_key: str, cache: DiskCache | None = None):
         super().__init__(cache)
         self.api_key = api_key
         self.http = HttpClient(BASE, max_per_sec=1.0)  # be gentle with AV limits
+        self._cooldown_until = 0.0
 
     def _q(self, section: str, ttl: float, params: dict) -> Any:
+        import time as _time
         p = dict(params)
         key = f"{sorted(p.items())}"
         hit = self.cache.get(f"av/{section}", key, ttl)
         if hit is not None:
             return hit
+        if _time.time() < self._cooldown_until:
+            raise ProviderUnsupported("alphavantage cooling down after throttle")
         p["apikey"] = self.api_key
         data = self.http.get_json("/query", p)
         if isinstance(data, dict) and ("Note" in data or "Information" in data):
+            self._cooldown_until = _time.time() + self.THROTTLE_COOLDOWN_SECONDS
+            log.warning("AlphaVantage throttled — cooling down %.0fs (uncached sections "
+                        "fall through to the next provider)", self.THROTTLE_COOLDOWN_SECONDS)
             raise ProviderError(f"AlphaVantage throttled: {data.get('Note') or data.get('Information')}")
         self.cache.set(f"av/{section}", key, data, source=self.name)
         return data

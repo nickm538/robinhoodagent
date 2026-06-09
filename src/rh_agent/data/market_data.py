@@ -259,12 +259,15 @@ class MarketData:
         if not td.company.get("market_cap"):
             td.company["market_cap"] = td.fundamentals.get("market_cap")
 
-        # technicals: local compute from prices, enriched by any provider extras
+        # technicals: local compute from prices always; provider enrichment only
+        # on deep builds — light passes run over hundreds of names and the local
+        # indicators already cover everything the light factors need.
         tech = compute_indicators(td.prices) if td.prices is not None else {}
-        prov_tech = self._try("technicals", "get_technicals", ticker)
-        if isinstance(prov_tech, dict):
-            for k, v in prov_tech.items():
-                tech.setdefault(k, v)
+        if deep:
+            prov_tech = self._try("technicals", "get_technicals", ticker)
+            if isinstance(prov_tech, dict):
+                for k, v in prov_tech.items():
+                    tech.setdefault(k, v)
         td.technicals = tech
 
         if deep:

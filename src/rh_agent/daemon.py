@@ -130,6 +130,34 @@ class AlwaysOnAgent:
         days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(sched, 1 / 24)
         return elapsed >= days * 86400
 
+    def _held_atr(self, ticker: str) -> float | None:
+        """ATR for risk management from CACHED daily bars (local compute).
+
+        ATR(14) on daily bars changes once per day, so rebuilding a full
+        TickerData (forced-fresh quote + 3-provider fundamentals merge +
+        provider technicals) for it every 60s tick was pure API-quota burn —
+        tens of thousands of calls/day that throttled providers and stalled
+        the hunt. Disk-cached prices + a local indicator pass cost ~nothing.
+        """
+        try:
+            df = self.agent.md.get_prices(ticker)
+            if df is None or not len(df):
+                return None
+            from .factors.indicators import compute_indicators
+            return compute_indicators(df).get("atr")
+        except Exception:
+            return None
+
+    def _prefetch_held_quotes(self, account) -> None:
+        """One batch quote request per tick for the held book (when supported)
+        instead of N forced per-name reads inside the stop/TP loop."""
+        held = [p.ticker for p in account.positions]
+        if held and hasattr(self.agent.md, "prefetch_quotes"):
+            try:
+                self.agent.md.prefetch_quotes(held)
+            except Exception as e:
+                log.debug("held-quote prefetch failed: %s", e)
+
     def _ensure_stops_for_held(self, broker, account) -> None:
         """On boot / each tick, every held name gets a stop if none is recorded."""
         rc = self.cfg.get("portfolio.risk_controls", {})
@@ -142,13 +170,7 @@ class AlwaysOnAgent:
             px = self.agent.price_fn(tk, for_risk=True) or pos.current_price or pos.avg_price
             if not px:
                 continue
-            atr = None
-            try:
-                td = self.agent.md.build(tk, deep=False)
-                atr = td.technicals.get("atr") if td else None
-            except Exception:
-                pass
-            stop = atr_stop(px, atr, atr_mult, hard_pct)
+            stop = atr_stop(px, self._held_atr(tk), atr_mult, hard_pct)
             self.state.stops[tk] = stop
             self.state.high_water[tk] = px
             log.info("synthesized stop for held %s @ %.2f", tk, stop)
@@ -181,6 +203,7 @@ class AlwaysOnAgent:
                 log.warning("DAILY DRAWDOWN HALT: %.1f%% <= -%.1f%% — suspending new buys",
                             100 * dd, 100 * dd_limit)
 
+        self._prefetch_held_quotes(account)
         self._ensure_stops_for_held(broker, account)
 
         # 1) risk management on open positions — EVERY tick, never blocked by a scan
@@ -341,13 +364,7 @@ class AlwaysOnAgent:
                     self.state.pending_risk[tk] = "take_profit"
                     log.error("TP sell failed for %s — keeping TP active", tk)
             elif stop:
-                atr = None
-                try:
-                    td = self.agent.md.build(tk, deep=False)
-                    atr = td.technicals.get("atr") if td else None
-                except Exception:
-                    pass
-                trail = trailing_stop(hw, atr, atr_mult, hard_pct)
+                trail = trailing_stop(hw, self._held_atr(tk), atr_mult, hard_pct)
                 if trail > stop:
                     self.state.stops[tk] = trail
         return triggered

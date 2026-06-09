@@ -171,15 +171,28 @@ def build_universe(md: MarketData, cfg: Config, raw: list[str] | None = None) ->
         if intraday_cfg.get("enabled", False)
         else None
     )
-    passed: list[Candidate] = []
-    for t in tickers:
-        if t in blacklist:
-            continue
+
+    def light(t: str) -> Candidate | None:
         try:
-            c = _light(md, t, max_quote_age_seconds=quote_age)
+            return _light(md, t, max_quote_age_seconds=quote_age)
         except Exception as e:
             log.debug("light fetch %s failed: %s", t, e)
-            c = None
+            return None
+
+    # The light pass is I/O-bound (each provider rate-limits itself); fan out
+    # like agent._gather does. Serially, a 400-name pass alone could outlast
+    # the rebalance cadence and trip the scan watchdog.
+    names = [t for t in tickers if t not in blacklist]
+    workers = int(cfg.get("data.max_workers", 8))
+    if workers > 1 and len(names) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            candidates = list(ex.map(light, names))
+    else:
+        candidates = [light(t) for t in names]
+
+    passed: list[Candidate] = []
+    for c in candidates:
         if not c:
             continue
         if c.sector in excl_sectors:
