@@ -31,9 +31,13 @@ class MarketData:
         self.cfg = config
         self.providers = {n: p for n, p in providers.items() if p and getattr(p, "enabled", True)}
         self.priority: dict = config.get("providers", {}) or {}
+        self._quote_prefetch: dict[str, Quote] = {}
 
     def _order(self, section: str) -> list[str]:
         return [n for n in self.priority.get(section, []) if n in self.providers]
+
+    def clear_quote_prefetch(self) -> None:
+        self._quote_prefetch.clear()
 
     def _try(self, section: str, method: str, *args, **kw) -> Any:
         for name in self._order(section):
@@ -71,23 +75,56 @@ class MarketData:
         return merged
 
     # ---- direct section accessors ----
+    def _cached_quote(self, t: str) -> Quote | None:
+        key = t.upper()
+        return self._quote_prefetch.get(key)
+
+    def prefetch_quotes(self, tickers: list[str]) -> int:
+        """Batch-warm quotes via Twelve Data when available (intraday radar accelerator).
+
+        Returns the number of quotes prefetched. Other providers are unchanged; this
+        only populates the in-memory prefetch map used before the normal fallback chain.
+        """
+        td = self.providers.get("twelvedata")
+        fn = getattr(td, "get_quotes_batch", None) if td else None
+        if not fn or not tickers:
+            return 0
+        try:
+            batch = fn([t.upper() for t in tickers if t])
+        except Exception as e:
+            log.debug("twelvedata batch quote prefetch failed: %s", e)
+            return 0
+        self._quote_prefetch.update(batch)
+        if batch:
+            log.info("prefetched %d quotes via twelvedata batch", len(batch))
+        return len(batch)
+
     def get_quote(self, t: str) -> Quote | None:
+        hit = self._cached_quote(t)
+        if hit and hit.price:
+            return hit
         return self._try("quote", "get_quote", t)
 
     def get_quote_for_risk(self, t: str, max_age_seconds: float = 180) -> Quote | None:
         """Fetch a quote for stop/TP decisions, bypassing stale disk cache when needed."""
+        hit = self._cached_quote(t)
+        if hit and hit.price:
+            age = (utcnow() - hit.asof).total_seconds()
+            if age <= max_age_seconds:
+                return hit
         # Provider caches store raw payloads, not Quote.asof, so a cached payload
         # can otherwise be rewrapped with a fresh timestamp. Force a live read on
         # this path; it is used only where stale prices are dangerous.
         self._invalidate_quote_cache(t)
-        q = self._try("quote", "get_quote", t)
+        section = "quote_risk" if self._order("quote_risk") else "quote"
+        q = self._try(section, "get_quote", t)
         if q and q.price:
             age = (utcnow() - q.asof).total_seconds()
             if age <= max_age_seconds:
                 return q
         # missing/stale -> invalidate disk cache and retry once
         self._invalidate_quote_cache(t)
-        q = self._try("quote", "get_quote", t)
+        q = self._try(section, "get_quote", t)
         return q if q and q.price else None
 
     def _invalidate_quote_cache(self, ticker: str) -> None:
@@ -133,19 +170,23 @@ class MarketData:
         return self.get_prices(symbol)
 
     def get_market_movers(self, limit: int = 60) -> list[str]:
-        """Today's top gainers / most-active symbols from the first capable provider."""
-        for name in (self.priority.get("universe") or list(self.providers)):
+        """Today's top gainers / most-active — merged from movers providers (de-duped)."""
+        order = self._order("movers") or self._order("universe") or list(self.providers)
+        out: list[str] = []
+        for name in order:
             p = self.providers.get(name)
             fn = getattr(p, "get_market_movers", None) if p else None
             if fn is None:
                 continue
             try:
-                m = fn(limit)
-                if m:
-                    return list(m)
-            except Exception:
-                continue
-        return []
+                for sym in fn(limit):
+                    if sym and sym not in out:
+                        out.append(sym)
+            except Exception as e:
+                log.debug("%s movers failed: %s", name, e)
+            if len(out) >= limit:
+                break
+        return out[:limit]
 
     def list_universe(self) -> list[str]:
         for name in (self.priority.get("universe") or list(self.providers)):

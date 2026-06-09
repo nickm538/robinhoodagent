@@ -30,12 +30,14 @@ providers:
   # quote/prices/fundamentals lists where it was dominating API spend once the
   # universe widened. It remains enabled for lower-frequency smart-money inputs:
   # insider (720m cache) and institutional (1440m cache). MBOUM is primary (per
-  # mandate), TwelveData covers quote/price fallback, Alpha Vantage fills unique
-  # gaps (news, macro, movers). Re-add "financialdatasets" to any list below to
-  # use it again.
-  fundamentals:   ["mboum", "alphavantage"]
+  # mandate). TwelveData (paid) accelerates intraday radar via batch quotes and
+  # fresher risk quotes; Alpha Vantage fills unique gaps (news, macro, movers).
+  # Re-add "financialdatasets" to any list below to use it again.
+  fundamentals:   ["mboum", "twelvedata", "alphavantage"]
   prices:         ["mboum", "twelvedata", "alphavantage"]
   quote:          ["mboum", "twelvedata", "alphavantage"]
+  # Intraday radar + stop/TP: TwelveData first when key is live (real-time tape).
+  quote_risk:     ["twelvedata", "mboum", "alphavantage"]
   technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
@@ -45,9 +47,10 @@ providers:
   options_flow:   ["alphavantage", "mboum"]
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
   macro:          ["alphavantage"]
-  # Universe/discovery: mboum paginated listing for the base set; Alpha Vantage
-  # TOP_GAINERS_LOSERS for the intraday movers feed (mboum has no movers endpoint).
+  # Universe/discovery: mboum paginated listing for the base set.
+  # Movers: Alpha Vantage TOP_GAINERS_LOSERS (cheap) + TwelveData gainers (Pro, merged).
   universe:       ["mboum", "alphavantage"]
+  movers:         ["alphavantage", "twelvedata"]
   cache_ttl_minutes:
     quote: 3
     prices: 720
@@ -95,6 +98,7 @@ universe:
     fallback_to_liquid_universe: true
     use_movers_feed: true           # seed today's top gainers / most-active into the hunt
     movers_limit: 35                # how many movers to pull from the feed each scan (more runners)
+    batch_quote_prefetch: true      # TwelveData batch /quote warm-up before intraday radar (paid)
   # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
   # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
   two_stage_threshold: 40         # above this many names, engage the funnel

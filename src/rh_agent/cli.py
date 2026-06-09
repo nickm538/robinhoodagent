@@ -49,8 +49,23 @@ def cmd_doctor(args) -> int:
              "robinhood": "https://agent.robinhood.com/mcp/trading"}
     for name, url in hosts.items():
         try:
-            r = requests.get(url, timeout=6)
-            print(f"  {name:18} HTTP {r.status_code}")
+            if name == "twelvedata":
+                key = cfg.api_key("twelvedata")
+                if key:
+                    r = requests.get(f"{url}/price",
+                                       params={"symbol": "SPY", "apikey": key}, timeout=8)
+                else:
+                    r = requests.get(url, timeout=6)
+            else:
+                r = requests.get(url, timeout=6)
+            ok = r.status_code == 200
+            if name == "twelvedata" and r.status_code == 200:
+                try:
+                    body = r.json()
+                    ok = body.get("status") != "error" and body.get("price") is not None
+                except Exception:
+                    ok = False
+            print(f"  {name:18} {'✓' if ok else f'HTTP {r.status_code}'}")
         except Exception as e:
             print(f"  {name:18} unreachable ({type(e).__name__})")
     print("\nIf hosts show 'Host not in allowlist', add them to your Claude Code web "

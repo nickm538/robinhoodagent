@@ -160,6 +160,12 @@ def build_universe(md: MarketData, cfg: Config, raw: list[str] | None = None) ->
         tickers = tickers[:hard_cap]
 
     intraday_cfg = u.get("intraday", {}) or {}
+    if (intraday_cfg.get("enabled", False) and intraday_cfg.get("batch_quote_prefetch", True)
+            and hasattr(md, "prefetch_quotes")):
+        if hasattr(md, "clear_quote_prefetch"):
+            md.clear_quote_prefetch()
+        md.prefetch_quotes(tickers)
+
     quote_age = (
         float(intraday_cfg.get("quote_max_age_seconds", 60))
         if intraday_cfg.get("enabled", False)
