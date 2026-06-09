@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import Callable
 
 from .config import Config
-from .debug_log import write_debug_log
 from .logging_setup import get_logger
 from .models import Account, Order, TargetPosition
 
@@ -29,15 +28,6 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     cur = account.position_map()
     tmap = {t.ticker: t for t in targets}
     orders: list[Order] = []
-    buy_skips = {
-        "excluded": 0,
-        "allow_buys_blocked": 0,
-        "missing_price": 0,
-        "inside_band": 0,
-        "under_min_notional": 0,
-    }
-    turnover_scaled = False
-    buying_power_scaled = False
 
     # --- exits & trims (sells) ---
     for tk, pos in cur.items():
@@ -58,22 +48,17 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     buys: list[Order] = []
     for tk, t in tmap.items():
         if tk in exclude:
-            buy_skips["excluded"] += 1
             continue
         if not allow_buys:
-            buy_skips["allow_buys_blocked"] += 1
             continue
         px = price_fn(tk)
         if not px:
-            buy_skips["missing_price"] += 1
             continue
         cur_w = (cur[tk].quantity * px) / equity if tk in cur else 0.0
         if (t.weight - cur_w) <= band:
-            buy_skips["inside_band"] += 1
             continue
         buy_dollars = (t.weight - cur_w) * equity
         if buy_dollars < min_notional:
-            buy_skips["under_min_notional"] += 1
             continue
         buys.append(Order(tk, "buy", round(buy_dollars / px, 4), notional=round(buy_dollars, 2),
                           reason=f"{'enter' if tk not in cur else 'add'} score={t.score}"))
@@ -81,7 +66,6 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     # --- turnover cap: scale buys down if needed (sells always allowed) ---
     buy_turnover = sum((o.notional or 0) for o in buys) / equity
     if buy_turnover > max_turn:
-        turnover_scaled = True
         scale = max_turn / buy_turnover
         for o in buys:
             o.notional = round((o.notional or 0) * scale, 2)
@@ -99,7 +83,6 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
         budget = bp * 0.97
         buy_total = sum((o.notional or 0) for o in buys)
         if buy_total > budget:
-            buying_power_scaled = True
             scale = (budget / buy_total) if buy_total else 0.0
             for o in buys:
                 o.notional = round((o.notional or 0) * scale, 2)
@@ -109,23 +92,6 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
             buys = [o for o in buys if (o.notional or 0) >= min_notional]
 
     orders.extend(buys)
-    # region agent log
-    write_debug_log(
-        hypothesis_id="E",
-        location="execution.py:93",
-        message="order build summary",
-        data={
-            "targets": len(targets),
-            "held_positions": len(cur),
-            "allow_buys": allow_buys,
-            "sell_orders": sum(1 for o in orders if o.side == "sell"),
-            "buy_orders": len(buys),
-            "turnover_scaled": turnover_scaled,
-            "buying_power_scaled": buying_power_scaled,
-            "buy_skips": buy_skips,
-        },
-    )
-    # endregion
     log.info("orders: %d (%d sells, %d buys)", len(orders),
              sum(1 for o in orders if o.side == "sell"), len(buys))
     return orders

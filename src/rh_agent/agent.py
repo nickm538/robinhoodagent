@@ -11,7 +11,6 @@ import pandas as pd
 
 from .config import Config
 from .data.market_data import MarketData
-from .debug_log import write_debug_log
 from .execution import build_orders
 from .logging_setup import get_logger
 from .models import Account, Order, Position, TargetPosition, TickerData, Verdict
@@ -166,23 +165,6 @@ class TradingAgent:
         ai_read = self._apply_ai_overlay(verdicts, td_map, regime)
         eligible = self.scorer.eligible(verdicts)
         targets = self.builder.build(eligible, td_map, regime, equity)
-        # region agent log
-        write_debug_log(
-            hypothesis_id="B",
-            location="agent.py:168",
-            message="scan result summary",
-            data={
-                "universe_size": full_n,
-                "deep_scored_names": len(names),
-                "scored_size": len(data),
-                "eligible_count": len(eligible),
-                "target_count": len(targets),
-                "held_included": len(include_tickers or []),
-                "top_verdicts": [v.ticker for v in verdicts[:5]],
-                "top_targets": [t.ticker for t in targets[:5]],
-            },
-        )
-        # endregion
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
                           equity=equity, universe_size=full_n, scored_size=len(data),
                           td_map=td_map, ai_market_read=ai_read)
@@ -423,9 +405,6 @@ class TradingAgent:
         td_map = scan.td_map or {}
         targets = list(scan.targets)
         hold_missing = bool(reb.get("hold_on_missing_data", True))
-        kept_missing: list[str] = []
-        kept_hysteresis: list[str] = []
-        exited: list[str] = []
 
         for pos in account.positions:
             tk = pos.ticker
@@ -438,38 +417,17 @@ class TradingAgent:
                                                "hold: missing scan data")
                     if target:
                         targets.append(target)
-                        kept_missing.append(tk)
                 continue
             if self._should_exit_held(verdict):
                 log.info("held %s failed exit discipline — allowing rebalance sell", tk)
-                exited.append(tk)
                 continue
             target = self._held_target(pos, verdict, td_map.get(tk), equity,
                                        "hold: exit hysteresis")
             if target:
                 targets.append(target)
-                kept_hysteresis.append(tk)
 
         if len(targets) != len(scan.targets):
             scan.targets = targets
-        # region agent log
-        write_debug_log(
-            hypothesis_id="D",
-            location="agent.py:430",
-            message="hold discipline outcome",
-            data={
-                "held_positions": len(account.positions),
-                "initial_targets": len(target_map),
-                "final_targets": len(scan.targets),
-                "kept_missing_count": len(kept_missing),
-                "kept_missing": kept_missing[:8],
-                "kept_hysteresis_count": len(kept_hysteresis),
-                "kept_hysteresis": kept_hysteresis[:8],
-                "exited_count": len(exited),
-                "exited": exited[:8],
-            },
-        )
-        # endregion
         return scan
 
     def _should_exit_held(self, verdict: Verdict) -> bool:

@@ -5,15 +5,19 @@ Auth: ?apikey= . Base https://api.twelvedata.com.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import pandas as pd
 
 from ..models import Quote
-from .base import DataProvider, DiskCache, HttpClient, ProviderUnsupported, prices_to_df
+from ..logging_setup import get_logger
+from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
+                   RateLimitError, prices_to_df)
 
 BASE = "https://api.twelvedata.com"
 _BATCH_CHUNK = 120
+log = get_logger("providers.twelvedata")
 
 
 def _num(x: Any) -> float | None:
@@ -45,16 +49,47 @@ class TwelveDataProvider(DataProvider):
         self.enable_market_movers = enable_market_movers or os.getenv(
             "TWELVEDATA_ENABLE_MARKET_MOVERS", ""
         ).lower() in ("1", "true", "yes")
+        self.rate_limit_cooldown_seconds = float(
+            os.getenv("TWELVEDATA_RATE_LIMIT_COOLDOWN_SECONDS", "300")
+        )
+        self._rate_limited_until = 0.0
+
+    def _rate_limit_active(self) -> bool:
+        return time.time() < self._rate_limited_until
+
+    def _enter_rate_limit_cooldown(self, seconds: float | None, reason: str) -> None:
+        cooldown = float(seconds) if seconds and seconds > 0 else self.rate_limit_cooldown_seconds
+        until = time.time() + cooldown
+        if until > self._rate_limited_until:
+            self._rate_limited_until = until
+        remaining = max(self._rate_limited_until - time.time(), 0.0)
+        log.warning("twelvedata cooling down for %.0fs after rate limit (%s)", remaining, reason)
+
+    @staticmethod
+    def _is_rate_limit_payload(data: Any) -> bool:
+        if not isinstance(data, dict):
+            return False
+        code = str(data.get("code", "")).strip()
+        msg = str(data.get("message", "")).lower()
+        return code == "429" or "rate limit" in msg or "too many requests" in msg
 
     def _q(self, section: str, ttl: float, path: str, params: dict):
+        if self._rate_limit_active():
+            raise ProviderUnsupported("twelvedata cooling down after rate limit")
         p = dict(params, apikey=self.api_key)
         key = f"{path}|{sorted(params.items())}"
         hit = self.cache.get(f"td/{section}", key, ttl)
         if hit is not None:
             return hit
-        data = self.http.get_json(path, p)
+        try:
+            data = self.http.get_json(path, p)
+        except RateLimitError as e:
+            self._enter_rate_limit_cooldown(e.retry_after_seconds, path)
+            raise ProviderUnsupported(str(e)) from e
         if isinstance(data, dict) and data.get("status") == "error":
             msg = str(data.get("message", ""))
+            if self._is_rate_limit_payload(data):
+                self._enter_rate_limit_cooldown(None, path)
             raise ProviderUnsupported(msg or "twelvedata error")
         self.cache.set(f"td/{section}", key, data, source=self.name)
         return data

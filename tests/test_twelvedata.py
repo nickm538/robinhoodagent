@@ -1,8 +1,11 @@
 """TwelveData provider and MarketData integration tests."""
 from __future__ import annotations
 
+import pytest
+
 from rh_agent.data.market_data import MarketData
 from rh_agent.models import Quote
+from rh_agent.providers.base import ProviderUnsupported, RateLimitError
 from rh_agent.providers.twelvedata import TwelveDataProvider
 
 
@@ -108,3 +111,35 @@ def test_market_movers_merge_providers():
     md.priority = {"movers": ["alphavantage", "twelvedata"]}
     md._quote_prefetch = {}
     assert md.get_market_movers(limit=10) == ["AAA", "BBB", "CCC"]
+
+
+def test_twelvedata_rate_limit_enters_cooldown_and_skips_repeat_calls():
+    p = TwelveDataProvider.__new__(TwelveDataProvider)
+    p.api_key = "x"
+    p.rate_limit_cooldown_seconds = 30.0
+    p._rate_limited_until = 0.0
+
+    class _Cache:
+        def get(self, namespace, key, ttl):
+            return None
+        def set(self, namespace, key, data, source=""):
+            raise AssertionError("cache.set should not run on rate limit")
+
+    class _Http:
+        def __init__(self):
+            self.calls = 0
+        def get_json(self, path, params):
+            self.calls += 1
+            raise RateLimitError("GET rate limited (HTTP 429)")
+
+    p.cache = _Cache()
+    p.http = _Http()
+
+    with pytest.raises(ProviderUnsupported, match="rate limited"):
+        p.get_prices("AAPL")
+    assert p.http.calls == 1
+    assert p._rate_limited_until > 0
+
+    with pytest.raises(ProviderUnsupported, match="cooling down"):
+        p.get_prices("MSFT")
+    assert p.http.calls == 1

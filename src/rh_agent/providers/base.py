@@ -33,6 +33,12 @@ class ProviderError(Exception):
     pass
 
 
+class RateLimitError(ProviderError):
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class DiskCache:
     """Tiny JSON disk cache. Keys are hashed; values carry capture time."""
 
@@ -109,10 +115,19 @@ class HttpClient:
             try:
                 r = self.session.get(url, params=params, headers=headers, timeout=self.timeout)
                 if r.status_code == 429:
-                    time.sleep(2 ** attempt)
-                    continue
+                    retry_after = r.headers.get("Retry-After")
+                    try:
+                        retry_after_s = float(retry_after) if retry_after else None
+                    except (TypeError, ValueError):
+                        retry_after_s = None
+                    raise RateLimitError(
+                        f"GET {url} rate limited (HTTP 429)",
+                        retry_after_seconds=retry_after_s,
+                    )
                 r.raise_for_status()
                 return r.json()
+            except RateLimitError:
+                raise
             except Exception as e:  # network / decode
                 last_err = e
                 time.sleep(min(2 ** attempt, 8))
@@ -129,10 +144,19 @@ class HttpClient:
             try:
                 r = self.session.post(url, json=payload, headers=headers, timeout=self.timeout)
                 if r.status_code == 429:
-                    time.sleep(2 ** attempt)
-                    continue
+                    retry_after = r.headers.get("Retry-After")
+                    try:
+                        retry_after_s = float(retry_after) if retry_after else None
+                    except (TypeError, ValueError):
+                        retry_after_s = None
+                    raise RateLimitError(
+                        f"POST {url} rate limited (HTTP 429)",
+                        retry_after_seconds=retry_after_s,
+                    )
                 r.raise_for_status()
                 return r.json()
+            except RateLimitError:
+                raise
             except Exception as e:  # network / decode
                 last_err = e
                 time.sleep(min(2 ** attempt, 8))
