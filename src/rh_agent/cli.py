@@ -43,13 +43,16 @@ def cmd_doctor(args) -> int:
     print(f"  robinhood token    {f'✓ ({src})' if rh_tok else '— (run: rh-agent auth)'}")
     print(f"\nExecution mode: {cfg.execution_mode}  |  live armed: {cfg.live_trading_armed}")
     print("\nDirect egress (needs your environment's network policy to allow these hosts):")
-    hosts = {"financialdatasets": "https://api.financialdatasets.ai",
-             "mboum": "https://api.mboum.com", "alphavantage": "https://www.alphavantage.co",
-             "twelvedata": "https://api.twelvedata.com", "firecrawl": "https://api.firecrawl.dev",
-             "robinhood": "https://agent.robinhood.com/mcp/trading"}
-    for name, url in hosts.items():
+    hosts = {"financialdatasets": ("https://api.financialdatasets.ai", None),
+             "mboum": ("https://api.mboum.com", None),
+             "alphavantage": ("https://www.alphavantage.co", None),
+             "twelvedata": ("https://api.twelvedata.com/quote",
+                            {"symbol": "AAPL", "apikey": cfg.api_key("twelvedata") or "demo"}),
+             "firecrawl": ("https://api.firecrawl.dev", None),
+             "robinhood": (cfg.robinhood_url(), None)}
+    for name, (url, params) in hosts.items():
         try:
-            r = requests.get(url, timeout=6)
+            r = requests.get(url, params=params, timeout=6)
             print(f"  {name:18} HTTP {r.status_code}")
         except Exception as e:
             print(f"  {name:18} unreachable ({type(e).__name__})")

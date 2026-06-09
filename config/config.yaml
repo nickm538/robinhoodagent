@@ -26,20 +26,22 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL: FinancialDatasets.AI is removed from the high-frequency
-  # quote/prices/fundamentals lists where it was dominating API spend once the
-  # universe widened. It remains enabled for lower-frequency smart-money inputs:
-  # insider (720m cache) and institutional (1440m cache). MBOUM is primary (per
-  # mandate), TwelveData covers quote/price fallback, Alpha Vantage fills unique
-  # gaps (news, macro, movers). Re-add "financialdatasets" to any list below to
+  # COST CONTROL + PAID DATA ROUTING: FinancialDatasets.AI is removed from the
+  # high-frequency quote/prices/fundamentals lists where it was dominating API
+  # spend once the universe widened. TwelveData is first for live quotes and
+  # price history because the deployment has a paid account; MBOUM remains the
+  # primary fundamentals/listing source, while Alpha Vantage fills unique gaps
+  # (news, macro, cheap movers). Re-add "financialdatasets" to any list below to
   # use it again.
   fundamentals:   ["mboum", "alphavantage"]
-  prices:         ["mboum", "twelvedata", "alphavantage"]
-  quote:          ["mboum", "twelvedata", "alphavantage"]
-  technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
+  prices:         ["twelvedata", "mboum", "alphavantage"]
+  quote:          ["twelvedata", "mboum", "alphavantage"]
+  quote_risk:     ["twelvedata", "mboum", "alphavantage"]
+  technicals:     ["twelvedata", "mboum", "alphavantage"]   # computed locally first; provider values enrich gaps
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "mboum"]
+  news_sentiment: ["alphavantage", "mboum", "web"]  # web is last resort and disabled unless explicitly enabled
+  news_headlines: ["alphavantage", "web"]           # structured API first, web only enriches AI context
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
   options_flow:   ["alphavantage", "mboum"]
@@ -47,7 +49,17 @@ providers:
   macro:          ["alphavantage"]
   # Universe/discovery: mboum paginated listing for the base set; Alpha Vantage
   # TOP_GAINERS_LOSERS for the intraday movers feed (mboum has no movers endpoint).
-  universe:       ["mboum", "alphavantage"]
+  universe:       ["mboum", "twelvedata", "alphavantage"]
+  movers:         ["alphavantage", "twelvedata"]
+  # TwelveData paid-plan tuning. Check your dashboard and set
+  # TWELVEDATA_MAX_PER_SEC or this value below your plan's request/sec limit.
+  twelvedata_max_per_sec: 8
+  # TwelveData market_movers costs 100 credits/request; Alpha Vantage's movers
+  # feed remains the default. Set true only if you want to spend TD credits here.
+  twelvedata_enable_market_movers: false
+  # Exa/Firecrawl are intentionally narrow: they enrich only parsed pro-source
+  # score fields by default. Generic web-news sentiment is off to avoid noise
+  # and look-forward bias; Alpha Vantage remains the structured news feed.
   cache_ttl_minutes:
     quote: 3
     prices: 720
@@ -58,6 +70,21 @@ providers:
     analyst_ratings: 720
     macro: 720
     pro_scores: 720
+
+# Exa + Firecrawl guardrails. Web data only runs during live/deep scans, never in
+# snapshot/backtest provider mode. It populates parsed pro-score fields and AI
+# headline context; generic web sentiment is an explicit opt-in last resort.
+web_research:
+  enabled: true
+  combine_engines: true
+  max_search_results: 3
+  max_chars_per_search: 8000
+  exa_recency_days: 3
+  min_sentiment_hits: 4
+  pro_scores_ttl_minutes: 720
+  headlines_ttl_minutes: 60
+  sentiment_ttl_minutes: 120
+  enable_news_sentiment: false
 
 # ----------------------------------------------------------------------
 # UNIVERSE  — what is eligible to trade. "Full universe minus penny stocks
@@ -95,6 +122,7 @@ universe:
     fallback_to_liquid_universe: true
     use_movers_feed: true           # seed today's top gainers / most-active into the hunt
     movers_limit: 35                # how many movers to pull from the feed each scan (more runners)
+    batch_quote_prefetch: true      # TwelveData batch quotes warm the radar before per-name light checks
   # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
   # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
   two_stage_threshold: 40         # above this many names, engage the funnel

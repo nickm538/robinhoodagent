@@ -38,12 +38,26 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
     td_key = cfg.api_key("twelvedata")
     if td_key:
         from .twelvedata import TwelveDataProvider
-        providers["twelvedata"] = TwelveDataProvider(td_key, cache)
+        providers["twelvedata"] = TwelveDataProvider(
+            td_key,
+            cache,
+            max_per_sec=float(cfg.get("providers.twelvedata_max_per_sec", 8)),
+            enable_market_movers=bool(cfg.get("providers.twelvedata_enable_market_movers", False)),
+        )
 
     fc_key, exa_key = cfg.api_key("firecrawl"), cfg.api_key("exa")
     if fc_key or exa_key:
         from .web_research import WebResearchProvider
-        web = WebResearchProvider(fc_key, exa_key, cache)
+        web = WebResearchProvider(
+            fc_key,
+            exa_key,
+            cache,
+            settings=cfg.get("web_research", {}) or {
+                "max_search_results": cfg.get("providers.web_research_max_results", 3),
+                "enable_news_sentiment": cfg.get(
+                    "providers.web_research_enable_news_sentiment", False),
+            },
+        )
         if web.enabled:
             providers["web"] = web
 
@@ -53,7 +67,8 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
 
 def snapshot_priorities() -> dict:
     """Route every data section to the snapshot provider."""
-    sections = ["fundamentals", "prices", "quote", "technicals", "insider", "institutional",
-                "news_sentiment", "analyst_ratings", "short_interest", "options_flow",
-                "pro_scores", "macro", "universe"]
+    sections = ["fundamentals", "prices", "quote", "quote_risk", "technicals", "insider",
+                "institutional", "news_sentiment", "news_headlines", "analyst_ratings",
+                "short_interest", "options_flow", "pro_scores", "macro", "universe",
+                "movers"]
     return {s: ["snapshot"] for s in sections}
