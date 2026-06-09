@@ -56,12 +56,13 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
         if not px:
             continue
         cur_w = (cur[tk].quantity * px) / equity if tk in cur else 0.0
-        buy_band = entry_band if tk not in cur else band
-        if (t.weight - cur_w) > buy_band:
-            buy_dollars = (t.weight - cur_w) * equity
-            if buy_dollars >= min_notional:
-                buys.append(Order(tk, "buy", round(buy_dollars / px, 4), notional=round(buy_dollars, 2),
-                                  reason=f"{'enter' if tk not in cur else 'add'} score={t.score}"))
+        if (t.weight - cur_w) <= band:
+            continue
+        buy_dollars = (t.weight - cur_w) * equity
+        if buy_dollars < min_notional:
+            continue
+        buys.append(Order(tk, "buy", round(buy_dollars / px, 4), notional=round(buy_dollars, 2),
+                          reason=f"{'enter' if tk not in cur else 'add'} score={t.score}"))
 
     # --- turnover cap: scale buys down if needed (sells always allowed) ---
     buy_turnover = sum((o.notional or 0) for o in buys) / equity

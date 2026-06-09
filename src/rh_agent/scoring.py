@@ -105,7 +105,9 @@ class Scorer:
         block_stale_quote = bool(rc.get("block_stale_quote", True))
         out = []
         for v in verdicts:
-            if v.composite < min_conf or v.pillars_passing < min_pillars:
+            if v.composite < min_conf:
+                continue
+            if v.pillars_passing < min_pillars:
                 continue
             if block_ai and "ai_caution" in v.flags:
                 continue

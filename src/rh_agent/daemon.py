@@ -189,6 +189,7 @@ class AlwaysOnAgent:
         # 1) risk management on open positions — EVERY tick, never blocked by a scan
         risk_actions = self._manage_risk(broker, account, execute)
         pending = set(self.state.pending_risk.keys())
+        due_for_rebalance = self._due_for_rebalance(now)
 
         # 2) harvest a finished background scan, or abandon a stuck one (watchdog)
         if self._scan_future is not None:
@@ -234,7 +235,7 @@ class AlwaysOnAgent:
                 broker=broker, account=account)
             self._apply_rebalance_result(run, account)
         # 4) otherwise, kick off a new scan when due (and none is in flight/pending)
-        elif (self._due_for_rebalance(now) and self._scan_future is None
+        elif (due_for_rebalance and self._scan_future is None
               and self._pending_scan is None and not risk_actions):
             equity = account.equity if (account.equity and account.equity > 0) \
                 else self.agent.default_equity()
