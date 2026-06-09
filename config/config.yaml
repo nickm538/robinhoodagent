@@ -26,17 +26,17 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL: FinancialDatasets.AI is removed from the high-frequency
-  # quote/prices/fundamentals lists where it was dominating API spend once the
-  # universe widened. It remains enabled for lower-frequency smart-money inputs:
-  # insider (720m cache) and institutional (1440m cache). MBOUM is primary (per
-  # mandate), TwelveData covers quote/price fallback, Alpha Vantage fills unique
-  # gaps (news, macro, movers). Re-add "financialdatasets" to any list below to
+  # COST CONTROL + PAID DATA ROUTING: FinancialDatasets.AI is removed from the
+  # high-frequency quote/prices/fundamentals lists where it was dominating API
+  # spend once the universe widened. TwelveData is first for live quotes and
+  # price history because the deployment has a paid account; MBOUM remains the
+  # primary fundamentals/listing source, while Alpha Vantage fills unique gaps
+  # (news, macro, cheap movers). Re-add "financialdatasets" to any list below to
   # use it again.
   fundamentals:   ["mboum", "alphavantage"]
-  prices:         ["mboum", "twelvedata", "alphavantage"]
-  quote:          ["mboum", "twelvedata", "alphavantage"]
-  technicals:     ["mboum", "alphavantage", "twelvedata"]   # computed locally if needed
+  prices:         ["twelvedata", "mboum", "alphavantage"]
+  quote:          ["twelvedata", "mboum", "alphavantage"]
+  technicals:     ["twelvedata", "mboum", "alphavantage"]   # computed locally first; provider values enrich gaps
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
   news_sentiment: ["alphavantage", "mboum"]
@@ -47,7 +47,13 @@ providers:
   macro:          ["alphavantage"]
   # Universe/discovery: mboum paginated listing for the base set; Alpha Vantage
   # TOP_GAINERS_LOSERS for the intraday movers feed (mboum has no movers endpoint).
-  universe:       ["mboum", "alphavantage"]
+  universe:       ["mboum", "twelvedata", "alphavantage"]
+  # TwelveData paid-plan tuning. Check your dashboard and set
+  # TWELVEDATA_MAX_PER_SEC or this value below your plan's request/sec limit.
+  twelvedata_max_per_sec: 8
+  # TwelveData market_movers costs 100 credits/request; Alpha Vantage's movers
+  # feed remains the default. Set true only if you want to spend TD credits here.
+  twelvedata_enable_market_movers: false
   cache_ttl_minutes:
     quote: 3
     prices: 720

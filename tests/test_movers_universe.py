@@ -59,6 +59,102 @@ def test_mboum_list_universe_paginates():
     assert syms == ["A", "B", "C"]   # walked pages 1+2, stopped on empty page 3
 
 
+def test_twelvedata_quote_and_invalidation_use_us_symbol_key():
+    import rh_agent.providers.twelvedata as td
+
+    p = td.TwelveDataProvider.__new__(td.TwelveDataProvider)
+    p._q = lambda section, ttl, path, params: {
+        "close": "212.34",
+        "volume": "123456",
+        "previous_close": "210.00",
+        "percent_change": "1.11",
+    }
+    q = p.get_quote("aapl")
+    assert q.ticker == "AAPL"
+    assert q.price == 212.34
+    assert q.volume == 123456
+    assert q.prev_close == 210.00
+    assert q.day_change_pct == 1.11
+
+    class _Cache:
+        def __init__(self):
+            self.ns = self.key = None
+
+        def _path(self, ns, key):
+            self.ns, self.key = ns, key
+
+            class _Path:
+                def unlink(self, missing_ok=False):
+                    pass
+
+            return _Path()
+
+    p.cache = _Cache()
+    p.invalidate_quote("aapl")
+    assert p.cache.ns == "td/quote"
+    assert "AAPL" in p.cache.key
+    assert "United States" in p.cache.key
+
+
+def test_twelvedata_technicals_use_current_indicator_endpoints():
+    import rh_agent.providers.twelvedata as td
+
+    p = td.TwelveDataProvider.__new__(td.TwelveDataProvider)
+    calls = []
+
+    def _q(section, ttl, path, params):
+        calls.append((path, params))
+        if path == "/rsi":
+            return {"values": [{"rsi": "61.5"}]}
+        if path == "/ema":
+            period = params["time_period"]
+            return {"values": [{"ema": "101.0" if period == 9 else "99.5"}]}
+        if path == "/macd":
+            return {"values": [{"macd": "1.2", "macd_signal": "0.8", "macd_hist": "0.4"}]}
+        raise AssertionError(path)
+
+    p._q = _q
+    out = p.get_technicals("MSFT")
+    assert out["rsi"] == 61.5
+    assert out["ema_9"] == 101.0
+    assert out["ema_21"] == 99.5
+    assert out["macd"] == 1.2
+    assert [path for path, _ in calls] == ["/rsi", "/ema", "/ema", "/macd"]
+
+
+def test_twelvedata_list_universe_filters_us_common_stocks():
+    import rh_agent.providers.twelvedata as td
+
+    p = td.TwelveDataProvider.__new__(td.TwelveDataProvider)
+    p._q = lambda section, ttl, path, params: {
+        "data": [
+            {"symbol": "AAPL", "currency": "USD", "type": "Common Stock"},
+            {"symbol": "SPY", "currency": "USD", "type": "ETF"},
+            {"symbol": "B.B", "currency": "USD", "type": "Common Stock"},
+            {"symbol": "SHOP", "currency": "CAD", "type": "Common Stock"},
+            {"symbol": "MSFT", "currency": "USD", "type": "Common Stock"},
+        ]
+    }
+    assert p.list_universe() == ["AAPL", "MSFT"]
+
+
+def test_twelvedata_market_movers_are_opt_in():
+    import pytest
+    import rh_agent.providers.twelvedata as td
+    from rh_agent.providers.base import ProviderUnsupported
+
+    p = td.TwelveDataProvider.__new__(td.TwelveDataProvider)
+    p.enable_market_movers = False
+    with pytest.raises(ProviderUnsupported):
+        p.get_market_movers()
+
+    p.enable_market_movers = True
+    p._q = lambda section, ttl, path, params: {
+        "values": [{"symbol": "AAA"}, {"symbol": "B.B"}, {"symbol": "CCC"}]
+    }
+    assert p.get_market_movers(limit=10) == ["AAA", "CCC"]
+
+
 def test_market_data_get_market_movers_facade():
     from rh_agent.data.market_data import MarketData
 

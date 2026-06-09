@@ -38,7 +38,12 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
     td_key = cfg.api_key("twelvedata")
     if td_key:
         from .twelvedata import TwelveDataProvider
-        providers["twelvedata"] = TwelveDataProvider(td_key, cache)
+        providers["twelvedata"] = TwelveDataProvider(
+            td_key,
+            cache,
+            max_per_sec=float(cfg.get("providers.twelvedata_max_per_sec", 8)),
+            enable_market_movers=bool(cfg.get("providers.twelvedata_enable_market_movers", False)),
+        )
 
     fc_key, exa_key = cfg.api_key("firecrawl"), cfg.api_key("exa")
     if fc_key or exa_key:
