@@ -10,9 +10,10 @@ def test_web_pro_scores_are_source_scoped_and_numeric_only():
     p = WebResearchProvider.__new__(WebResearchProvider)
     p.enabled = True
     p.max_results = 3
+    p.pro_scores_ttl = 720
     queries = []
 
-    def _search_text(query, ttl=720, limit=None):
+    def _search_text(query, ttl=720, limit=None, recency=True):
         queries.append(query)
         if "zacks.com" in query:
             return "AAPL Apple Inc Zacks Rank #2 (Buy)"
@@ -41,7 +42,9 @@ def test_web_pro_scores_ignore_off_subject_results():
     p = WebResearchProvider.__new__(WebResearchProvider)
     p.enabled = True
     p.max_results = 3
-    p._search_text = lambda query, ttl=720, limit=None: "MSFT Zacks Rank #1 AI Score 10/10"
+    p.pro_scores_ttl = 720
+    p._search_text = lambda query, ttl=720, limit=None, recency=True: \
+        "MSFT Zacks Rank #1 AI Score 10/10"
 
     with pytest.raises(ProviderUnsupported):
         p.get_pro_scores("AAPL", "Apple Inc")
@@ -57,7 +60,28 @@ def test_web_news_sentiment_is_opt_in():
 
     p.enable_news_sentiment = True
     p.max_results = 3
-    p._search_text = lambda query, ttl=120, limit=6: "AAPL beat estimates and shares surge"
+    p.sentiment_ttl = 120
+    p.min_sentiment_hits = 2
+    p._search_text = lambda query, ttl=120, limit=6, recency=True: \
+        "AAPL beat estimates and shares surge"
     out = p.get_news_sentiment("AAPL")
     assert out["score"] > 0
     assert out["source"] == "web"
+
+
+def test_web_headlines_merge_firecrawl_and_exa_snippets():
+    p = WebResearchProvider.__new__(WebResearchProvider)
+    p.enabled = True
+    p.headlines_ttl = 60
+    p.max_results = 3
+    p.combine_engines = True
+    p._search_snippets = lambda query, ttl, limit=None, recency=True: [
+        {"title": "AAPL launches new chip", "text": "", "source": "firecrawl"},
+        {"title": "Analysts discuss AAPL demand", "text": "", "source": "exa"},
+        {"title": "AAPL launches new chip", "text": "", "source": "exa"},
+    ]
+
+    assert p.get_headlines("AAPL", limit=3) == [
+        "AAPL launches new chip",
+        "Analysts discuss AAPL demand",
+    ]

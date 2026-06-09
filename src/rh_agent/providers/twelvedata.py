@@ -13,6 +13,7 @@ from ..models import Quote
 from .base import DataProvider, DiskCache, HttpClient, ProviderUnsupported, prices_to_df
 
 BASE = "https://api.twelvedata.com"
+_BATCH_CHUNK = 120
 
 
 def _num(x: Any) -> float | None:
@@ -53,21 +54,55 @@ class TwelveDataProvider(DataProvider):
             return hit
         data = self.http.get_json(path, p)
         if isinstance(data, dict) and data.get("status") == "error":
-            raise ProviderUnsupported
+            msg = str(data.get("message", ""))
+            raise ProviderUnsupported(msg or "twelvedata error")
         self.cache.set(f"td/{section}", key, data, source=self.name)
         return data
 
-    def get_quote(self, ticker: str) -> Quote:
-        symbol = ticker.upper()
-        d = self._q("quote", 1, "/quote", {"symbol": symbol, "country": "United States"})
+    def _parse_quote(self, ticker: str, d: dict) -> Quote | None:
+        if not isinstance(d, dict):
+            return None
+        symbol = (d.get("symbol") or ticker).upper()
         price = _num(d.get("close") or d.get("last") or d.get("price"))
         if price is None:
-            raise ProviderUnsupported
+            return None
         return Quote(ticker=symbol, price=price,
                      volume=_num(d.get("volume")) or 0,
                      prev_close=_num(d.get("previous_close")),
                      day_change_pct=_num(d.get("percent_change")),
                      source=self.name)
+
+    def get_quote(self, ticker: str) -> Quote:
+        symbol = ticker.upper()
+        d = self._q("quote", 1, "/quote", {"symbol": symbol, "country": "United States"})
+        q = self._parse_quote(symbol, d)
+        if q is None:
+            raise ProviderUnsupported
+        return q
+
+    def get_quotes_batch(self, tickers: list[str]) -> dict[str, Quote]:
+        """Fetch up to 120 symbols per request via comma-separated /quote."""
+        out: dict[str, Quote] = {}
+        symbols = [t.strip().upper() for t in tickers if t and t.strip()]
+        for i in range(0, len(symbols), _BATCH_CHUNK):
+            chunk = symbols[i:i + _BATCH_CHUNK]
+            if not chunk:
+                continue
+            d = self._q("quote", 1, "/quote",
+                        {"symbol": ",".join(chunk), "country": "United States"})
+            if isinstance(d, dict) and d.get("symbol"):
+                q = self._parse_quote(str(d["symbol"]).upper(), d)
+                if q:
+                    out[q.ticker] = q
+                continue
+            if isinstance(d, dict):
+                for sym, payload in d.items():
+                    if sym in ("status", "code", "message") or not isinstance(payload, dict):
+                        continue
+                    q = self._parse_quote(str(payload.get("symbol") or sym).upper(), payload)
+                    if q:
+                        out[q.ticker] = q
+        return out
 
     def invalidate_quote(self, ticker: str) -> None:
         key = f"/quote|{sorted({'symbol': ticker.upper(), 'country': 'United States'}.items())}"
@@ -105,6 +140,7 @@ class TwelveDataProvider(DataProvider):
             "sector": d.get("sector"),
             "industry": d.get("industry"),
             "exchange": d.get("exchange"),
+            "market_cap": _num(d.get("market_capitalization") or d.get("market_cap")),
             "source": self.name,
         }
 

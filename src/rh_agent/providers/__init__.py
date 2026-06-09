@@ -52,8 +52,11 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
             fc_key,
             exa_key,
             cache,
-            max_results=int(cfg.get("providers.web_research_max_results", 3)),
-            enable_news_sentiment=bool(cfg.get("providers.web_research_enable_news_sentiment", False)),
+            settings=cfg.get("web_research", {}) or {
+                "max_search_results": cfg.get("providers.web_research_max_results", 3),
+                "enable_news_sentiment": cfg.get(
+                    "providers.web_research_enable_news_sentiment", False),
+            },
         )
         if web.enabled:
             providers["web"] = web
@@ -64,7 +67,8 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
 
 def snapshot_priorities() -> dict:
     """Route every data section to the snapshot provider."""
-    sections = ["fundamentals", "prices", "quote", "technicals", "insider", "institutional",
-                "news_sentiment", "analyst_ratings", "short_interest", "options_flow",
-                "pro_scores", "macro", "universe"]
+    sections = ["fundamentals", "prices", "quote", "quote_risk", "technicals", "insider",
+                "institutional", "news_sentiment", "news_headlines", "analyst_ratings",
+                "short_interest", "options_flow", "pro_scores", "macro", "universe",
+                "movers"]
     return {s: ["snapshot"] for s in sections}
