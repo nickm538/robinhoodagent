@@ -10,6 +10,7 @@ the corresponding factor neutralises itself.
 """
 from __future__ import annotations
 
+import os
 import re
 
 from ..logging_setup import get_logger
@@ -25,10 +26,15 @@ class WebResearchProvider(DataProvider):
     name = "web"
 
     def __init__(self, firecrawl_key: str | None = None, exa_key: str | None = None,
-                 cache: DiskCache | None = None):
+                 cache: DiskCache | None = None, *, max_results: int = 3,
+                 enable_news_sentiment: bool = False):
         super().__init__(cache)
         self.firecrawl_key = firecrawl_key
         self.exa_key = exa_key
+        self.max_results = max(1, min(int(max_results), 5))
+        self.enable_news_sentiment = enable_news_sentiment or os.getenv(
+            "WEB_RESEARCH_ENABLE_NEWS_SENTIMENT", ""
+        ).lower() in ("1", "true", "yes")
         self.fc = (HttpClient(FIRECRAWL, max_per_sec=2,
                               default_headers={"Authorization": f"Bearer {firecrawl_key}"})
                    if firecrawl_key else None)
@@ -38,7 +44,8 @@ class WebResearchProvider(DataProvider):
             self.enabled = False
 
     # ---- low level search returning concatenated text from top results ----
-    def _search_text(self, query: str, ttl: float = 720, limit: int = 5) -> str:
+    def _search_text(self, query: str, ttl: float = 720, limit: int | None = None) -> str:
+        limit = self.max_results if limit is None else max(1, min(int(limit), 5))
         hit = self.cache.get("web/search", query, ttl)
         if hit is not None:
             return hit
@@ -72,6 +79,23 @@ class WebResearchProvider(DataProvider):
         self.cache.set("web/search", query, text, source="web")
         return text
 
+    @staticmethod
+    def _mentions_subject(text: str, ticker: str, name: str | None) -> bool:
+        hay = text.lower()
+        if re.search(rf"\b{re.escape(ticker.lower())}\b", hay):
+            return True
+        if name:
+            tokens = [t for t in re.split(r"[^a-zA-Z0-9]+", name.lower()) if len(t) >= 4]
+            return any(t in hay for t in tokens[:3])
+        return False
+
+    def _source_text(self, source: str, query: str, ticker: str, name: str | None) -> str:
+        text = self._search_text(query, ttl=720)
+        if text and self._mentions_subject(text, ticker, name):
+            return text
+        log.debug("web %s result ignored for %s: subject not present", source, ticker)
+        return ""
+
     # ---- public: pro-source scores ----
     def get_pro_scores(self, ticker: str, name: str | None = None) -> dict:
         if not self.enabled:
@@ -79,12 +103,14 @@ class WebResearchProvider(DataProvider):
         label = f"{ticker} {name or ''}".strip()
         out: dict = {"source": "web"}
 
-        zacks = self._search_text(f"{label} stock Zacks Rank rating")
+        zacks = self._source_text(
+            "zacks", f"site:zacks.com/stock/quote {label} Zacks Rank", ticker, name)
         m = re.search(r"Zacks Rank[^0-9#]{0,12}#?\s*([1-5])\b", zacks, re.I)
         if m:
             out["zacks_rank"] = int(m.group(1))  # 1=Strong Buy .. 5=Strong Sell
 
-        dane = self._search_text(f"{ticker} Danelfin AI Score")
+        dane = self._source_text(
+            "danelfin", f"site:danelfin.com/stock {label} Danelfin AI Score", ticker, name)
         m = re.search(r"AI Score[^0-9]{0,8}(\d{1,2})\s*/\s*10", dane, re.I) or \
             re.search(r"AI Score of\s*(\d{1,2})", dane, re.I)
         if m:
@@ -92,14 +118,19 @@ class WebResearchProvider(DataProvider):
             if 1 <= v <= 10:
                 out["danelfin_ai"] = v
 
-        ms = self._search_text(f"{label} Morningstar star rating fair value")
+        ms = self._source_text(
+            "morningstar",
+            f"site:morningstar.com/stocks {label} Morningstar star rating fair value",
+            ticker, name)
         m = re.search(r"(\d)\s*-?\s*star", ms, re.I)
         if m:
             v = int(m.group(1))
             if 1 <= v <= 5:
                 out["morningstar_stars"] = v
 
-        tr = self._search_text(f"{ticker} TipRanks Smart Score analyst consensus")
+        tr = self._source_text(
+            "tipranks", f"site:tipranks.com/stocks {label} Smart Score analyst consensus",
+            ticker, name)
         m = re.search(r"Smart Score[^0-9]{0,8}(\d{1,2})\b", tr, re.I)
         if m:
             v = int(m.group(1))
@@ -112,7 +143,7 @@ class WebResearchProvider(DataProvider):
 
     def get_news_sentiment(self, ticker: str) -> dict:
         """Headline-tone fallback when API sentiment is unavailable."""
-        if not self.enabled:
+        if not self.enabled or not self.enable_news_sentiment:
             raise ProviderUnsupported
         text = self._search_text(f"{ticker} stock news today", ttl=120, limit=6).lower()
         if not text:

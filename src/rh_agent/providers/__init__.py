@@ -48,7 +48,13 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
     fc_key, exa_key = cfg.api_key("firecrawl"), cfg.api_key("exa")
     if fc_key or exa_key:
         from .web_research import WebResearchProvider
-        web = WebResearchProvider(fc_key, exa_key, cache)
+        web = WebResearchProvider(
+            fc_key,
+            exa_key,
+            cache,
+            max_results=int(cfg.get("providers.web_research_max_results", 3)),
+            enable_news_sentiment=bool(cfg.get("providers.web_research_enable_news_sentiment", False)),
+        )
         if web.enabled:
             providers["web"] = web
 

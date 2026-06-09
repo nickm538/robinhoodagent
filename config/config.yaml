@@ -54,6 +54,11 @@ providers:
   # TwelveData market_movers costs 100 credits/request; Alpha Vantage's movers
   # feed remains the default. Set true only if you want to spend TD credits here.
   twelvedata_enable_market_movers: false
+  # Exa/Firecrawl are intentionally narrow: they enrich only parsed pro-source
+  # score fields by default. Generic web-news sentiment is off to avoid noise
+  # and look-forward bias; Alpha Vantage remains the structured news feed.
+  web_research_max_results: 3
+  web_research_enable_news_sentiment: false
   cache_ttl_minutes:
     quote: 3
     prices: 720
