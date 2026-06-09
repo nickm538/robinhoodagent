@@ -157,10 +157,22 @@ class TradingAgent:
 
         log.info("deep-scoring %d tickers", len(names))
         data = self._gather(names, deep=True)
+        # A deep gather (+ AI) can take many minutes; quotes fetched at the start
+        # would otherwise all flag stale_quote and zero out eligibility.
+        freshness = self.cfg.get("data.freshness", {}) or {}
+        max_quote_age = float(freshness.get("quote_max_age_seconds", 120))
+        refresh = getattr(self.md, "refresh_quotes", None)
+        if data and "snapshot" not in self.providers and refresh:
+            refresh([td.ticker for td in data], max_age_seconds=max_quote_age)
+            for td in data:
+                q = self.md.get_quote(td.ticker)
+                if q:
+                    td.quote = q
         for td in data:
             if td.quote:
                 self._quote_cache[td.ticker] = td.quote.price
         verdicts = self.scorer.score(data, regime)
+        self._apply_intraday_hunter_boost(verdicts, {td.ticker: td for td in data})
         td_map = {td.ticker: td for td in data}
         ai_read = self._apply_ai_overlay(verdicts, td_map, regime)
         eligible = self.scorer.eligible(verdicts)
@@ -168,6 +180,33 @@ class TradingAgent:
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
                           equity=equity, universe_size=full_n, scored_size=len(data),
                           td_map=td_map, ai_market_read=ai_read)
+
+    def _apply_intraday_hunter_boost(self, verdicts: list[Verdict],
+                                     td_map: dict[str, TickerData]) -> None:
+        """Lift today's runners in the cross-section so snipes beat sleepy mega-caps."""
+        intraday = self.cfg.get("universe.intraday", {}) or {}
+        if not intraday.get("enabled", False):
+            return
+        boost_max = float(intraday.get("composite_boost_max", 15.0))
+        min_day = float(intraday.get("min_positive_day_change_pct", 0.5))
+        for v in verdicts:
+            td = td_map.get(v.ticker)
+            if not td or not td.quote:
+                continue
+            dc = float(td.quote.day_change_pct or 0.0)
+            if dc < min_day:
+                continue
+            rel = 1.0
+            if td.prices is not None and len(td.prices) and "volume" in td.prices.columns:
+                avg = float(td.prices["volume"].iloc[-22:-1].mean() or 0)
+                latest = float(td.quote.volume or td.prices["volume"].iloc[-1] or 0)
+                if avg > 0:
+                    rel = min(latest / avg, 6.0)
+            bump = min(boost_max, dc * 1.2 + rel * 1.5)
+            if bump > 0:
+                v.composite = round(min(100.0, v.composite + bump), 1)
+                v.rationale += f" | snipe+{bump:.0f}"
+        verdicts.sort(key=lambda x: x.composite, reverse=True)
 
     def _apply_ai_overlay(self, verdicts, td_map, regime) -> str:
         """Blend the Claude AI analyst's view into the composite. No-op if the
@@ -418,7 +457,8 @@ class TradingAgent:
                     if target:
                         targets.append(target)
                 continue
-            if self._should_exit_held(verdict):
+            if self._should_exit_held(verdict) or self._should_rotate_for_runner(
+                    tk, verdict, scan, account):
                 log.info("held %s failed exit discipline — allowing rebalance sell", tk)
                 continue
             target = self._held_target(pos, verdict, td_map.get(tk), equity,
@@ -429,6 +469,26 @@ class TradingAgent:
         if len(targets) != len(scan.targets):
             scan.targets = targets
         return scan
+
+    def _should_rotate_for_runner(self, ticker: str, verdict: Verdict,
+                                  scan: ScanResult, account: Account) -> bool:
+        """Sell a stale hold when a materially stronger fresh runner is in the book."""
+        hunter = self.cfg.get("hunter", {}) or {}
+        if not hunter.get("rotation_enabled", True):
+            return False
+        held = {p.ticker for p in account.positions}
+        if ticker not in held:
+            return False
+        margin = float(hunter.get("rotation_score_margin", 6.0))
+        newcomers = [t for t in scan.targets if t.ticker not in held]
+        if not newcomers:
+            return False
+        best_new = max(newcomers, key=lambda t: t.score)
+        if best_new.score >= verdict.composite + margin:
+            log.info("rotation: %s (%.0f) yields slot to snipe %s (%.0f)",
+                     ticker, verdict.composite, best_new.ticker, best_new.score)
+            return True
+        return False
 
     def _should_exit_held(self, verdict: Verdict) -> bool:
         reb = self.cfg.get("portfolio.rebalance", {}) or {}

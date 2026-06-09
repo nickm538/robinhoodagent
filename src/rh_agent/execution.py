@@ -21,8 +21,9 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
         return []
     reb = cfg.get("portfolio.rebalance", {})
     band = float(reb.get("no_trade_band", 0.015))
+    entry_band = float(reb.get("entry_no_trade_band", 0.0))
     max_turn = float(reb.get("max_turnover_per_rebalance", 0.30))
-    min_notional = 20.0
+    min_notional = float(reb.get("min_order_notional", 20.0))
 
     exclude = exclude_tickers or set()
     cur = account.position_map()
@@ -55,7 +56,8 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
         if not px:
             continue
         cur_w = (cur[tk].quantity * px) / equity if tk in cur else 0.0
-        if (t.weight - cur_w) > band:
+        buy_band = entry_band if tk not in cur else band
+        if (t.weight - cur_w) > buy_band:
             buy_dollars = (t.weight - cur_w) * equity
             if buy_dollars >= min_notional:
                 buys.append(Order(tk, "buy", round(buy_dollars / px, 4), notional=round(buy_dollars, 2),

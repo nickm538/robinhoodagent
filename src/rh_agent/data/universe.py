@@ -203,8 +203,14 @@ def build_universe(md: MarketData, cfg: Config, raw: list[str] | None = None) ->
 
     pre = u.get("prescreen", {})
     if pre.get("enabled", True) and len(passed) > pre.get("max_candidates", 250):
-        passed.sort(key=lambda c: c.mom_63, reverse=True)
+        # During live hunts, rank survivors by today's opportunity — not slow 3m
+        # momentum — so runners actually reach the deep-score funnel.
+        if intraday_cfg.get("enabled", False):
+            passed.sort(key=lambda c: (c.intraday_score, c.day_change_pct, c.mom_63), reverse=True)
+            log.info("prescreen kept top %d by intraday opportunity score", len(passed))
+        else:
+            passed.sort(key=lambda c: c.mom_63, reverse=True)
+            log.info("prescreen kept top %d by 3-month momentum", len(passed))
         passed = passed[: pre.get("max_candidates", 250)]
-        log.info("prescreen kept top %d by 3-month momentum", len(passed))
 
     return [c.ticker for c in passed]

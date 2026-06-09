@@ -26,18 +26,14 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL + PAID DATA ROUTING: FinancialDatasets.AI is removed from the
-  # high-frequency quote/prices/fundamentals lists where it was dominating API
-  # spend once the universe widened. TwelveData is first for live quotes and
-  # price history because the deployment has a paid account; MBOUM remains the
-  # primary fundamentals/listing source, while Alpha Vantage fills unique gaps
-  # (news, macro, cheap movers). Re-add "financialdatasets" to any list below to
-  # use it again.
-  fundamentals:   ["mboum", "alphavantage"]
-  prices:         ["twelvedata", "mboum", "alphavantage"]
-  quote:          ["twelvedata", "mboum", "alphavantage"]
-  quote_risk:     ["twelvedata", "mboum", "alphavantage"]
-  technicals:     ["twelvedata", "mboum", "alphavantage"]   # computed locally first; provider values enrich gaps
+  # PAID PRIMARY SOURCES: FinancialDatasets.AI + Mboum lead (mandate). TwelveData
+  # accelerates batch quotes for the intraday radar; Alpha Vantage fills movers,
+  # news, macro. FD is kept off ultra-high-frequency quote paths to control spend.
+  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
+  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  quote:          ["mboum", "financialdatasets", "twelvedata", "alphavantage"]
+  quote_risk:     ["mboum", "twelvedata", "financialdatasets", "alphavantage"]
+  technicals:     ["mboum", "twelvedata", "financialdatasets", "alphavantage"]
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
   news_sentiment: ["alphavantage", "mboum", "web"]  # web is last resort and disabled unless explicitly enabled
@@ -111,26 +107,24 @@ universe:
   # Intraday radar: fast quote/volume/change filter before expensive deep scoring.
   intraday:
     enabled: true
-    quote_max_age_seconds: 60
-    max_candidates: 120
-    min_candidates: 30
-    min_day_change_pct: 2.0
-    min_positive_day_change_pct: 0.5
-    min_relative_volume: 1.5
-    min_dollar_volume_today: 2000000
-    min_breakout_pct: 0.01
+    quote_max_age_seconds: 90
+    max_candidates: 150
+    min_candidates: 20
+    min_day_change_pct: 1.0         # snipe earlier — don't wait for +2% blowoffs only
+    min_positive_day_change_pct: 0.3
+    min_relative_volume: 1.2
+    min_dollar_volume_today: 1500000
+    min_breakout_pct: 0.005
+    composite_boost_max: 15.0       # lift today's runners vs sleepy mega-cap incumbents
     fallback_to_liquid_universe: true
-    use_movers_feed: true           # seed today's top gainers / most-active into the hunt
-    movers_limit: 35                # how many movers to pull from the feed each scan (more runners)
-    batch_quote_prefetch: true      # TwelveData batch quotes warm the radar before per-name light checks
-  # Two-stage funnel: light-rank the WHOLE list on fast signals, then deep-score +
-  # AI-review only the top survivors — keeps a wide hunt tractable on small hardware.
-  two_stage_threshold: 40         # above this many names, engage the funnel
-  deep_top_k: 20                  # deep-score (+ AI) only the top N from the light pass
-  # Coarse pre-screen (used in auto/full-universe mode).
+    use_movers_feed: true
+    movers_limit: 50
+    batch_quote_prefetch: true
+  two_stage_threshold: 30
+  deep_top_k: 35                    # wider deep funnel for hunter mode
   prescreen:
     enabled: true
-    max_candidates: 150           # deep-score at most this many survivors per run
+    max_candidates: 180
 
 # ----------------------------------------------------------------------
 # THE PANEL OF FIVE  — five veteran-trader personas (an ensemble). Each
@@ -224,8 +218,7 @@ normalize:
 # ----------------------------------------------------------------------
 portfolio:
   target_positions: 5            # ~$500 account -> 5 positions ~$85 each, comfortably above the $20 min
-  min_conviction_score: 50.0     # composite floor (loosened for more deployment); the book is
-                                 # capped at the (auto-scaled) target_positions, so this just gates fill
+  min_conviction_score: 45.0     # hunter floor — book size is capped by target_positions
   weighting: "vol_target"        # inverse-volatility / conviction blend
   conviction_tilt: 0.5           # 0=pure inverse-vol, 1=pure conviction-weighted
   max_position_weight: 0.30      # small account: lets the top name tilt while keeping 5 names viable
@@ -246,12 +239,12 @@ portfolio:
       - [10000, 10, 0.14, 0.40]
       - [25000, 12, 0.12, 0.35]   # full diversified book past the PDT threshold
   rebalance:
-    schedule: "intraday"         # AGGRESSIVE: re-rank every 30 min (cost middle-ground
-                                 # between 15-min firehose and hourly). Stops/TPs are
-                                 # decoupled and still checked every 60s regardless.
-    intraday_hours: 0.5          # 30 minutes between hunts
-    no_trade_band: 0.01          # act on drift >= 1% — more responsive rebalancing
-    max_turnover_per_rebalance: 0.40  # allow more rotation per rebalance
+    schedule: "intraday"         # re-hunt every 20 min; stops/TPs still every 60s tick
+    intraday_hours: 0.33         # ~20 minutes between hunts
+    no_trade_band: 0.008         # trims on held names
+    entry_no_trade_band: 0.0     # NEW entries fire immediately — no drift cushion
+    min_order_notional: 15.0     # small-account friendly (Robinhood ~$1 min share rules)
+    max_turnover_per_rebalance: 0.55
     # Sell discipline: stops/TPs still fire every tick. Exit gates are now close to
     # the entry gates so stale holds are actively ROTATED OUT for fresh conviction
     # (a small buffer below entry avoids boundary flip-flop).
@@ -296,21 +289,24 @@ ai_analyst:
 # DATA  — concurrency for live full-universe scans (snapshot runs serial).
 # ----------------------------------------------------------------------
 data:
-  max_workers: 8
+  max_workers: 10
   freshness:
-    quote_max_age_seconds: 120
+    quote_max_age_seconds: 180   # deep gather+AI can run 10+ min; refresh before score
     prices_max_age_days: 5
 
 # ----------------------------------------------------------------------
 # DAEMON  — the always-on autonomous loop.
 # ----------------------------------------------------------------------
+hunter:
+  rotation_enabled: true       # sell a stale hold when a fresh runner scores materially higher
+  rotation_score_margin: 6.0   # composite points the newcomer must beat the incumbent by
+
 daemon:
-  poll_seconds: 60             # risk/stop checks every minute; rebalance gated by cadence above
-  trade_only_when_open: true   # only trade during US market hours
+  poll_seconds: 60
+  trade_only_when_open: true
   manage_stops_every_tick: true
-  scan_timeout_seconds: 1800   # watchdog: abandon a background scan that runs longer than
-                               # this (a true hang) so hunting can never silently stall.
-                               # Normal scans take ~10-15 min; 30 min only trips on a stall.
+  pending_scan_max_seconds: 300  # never let a finished hunt rot behind retrying risk sells
+  scan_timeout_seconds: 1800
 
 # ----------------------------------------------------------------------
 # JOURNAL / MEMORY  — self-improving log. Records every executed order with its

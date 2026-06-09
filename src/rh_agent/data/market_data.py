@@ -94,6 +94,23 @@ class MarketData:
             log.info("prefetched %d quotes via twelvedata batch", len(batch))
         return len(batch)
 
+    def refresh_quotes(self, tickers: list[str], *, max_age_seconds: float = 120) -> int:
+        """Re-fetch live quotes immediately before scoring so a long gather/AI pass
+        does not leave every name flagged stale_quote and ineligible to trade."""
+        if not tickers:
+            return 0
+        self.clear_quote_prefetch()
+        warmed = self.prefetch_quotes(tickers)
+        fresh = 0
+        for t in tickers:
+            q = self.get_quote_for_risk(t, max_age_seconds=max_age_seconds)
+            if q and q.price:
+                self._quote_prefetch[t.upper()] = q
+                fresh += 1
+        if fresh:
+            log.info("refreshed %d/%d live quotes before scoring", fresh, len(tickers))
+        return fresh
+
     def get_quote(self, t: str) -> Quote | None:
         hit = self._cached_quote(t)
         if hit and hit.price:
