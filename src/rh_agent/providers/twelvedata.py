@@ -16,7 +16,7 @@ from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
                    RateLimitError, prices_to_df)
 
 BASE = "https://api.twelvedata.com"
-_BATCH_CHUNK = 120
+_BATCH_CHUNK = 60
 log = get_logger("providers.twelvedata")
 
 
@@ -46,6 +46,9 @@ class TwelveDataProvider(DataProvider):
         if rate is None:
             rate = float(os.getenv("TWELVEDATA_MAX_PER_SEC", "8"))
         self.http = HttpClient(BASE, max_per_sec=rate)
+        # Adaptive batch size: shrinks (and stays shrunk) if the plan rejects
+        # a large comma-separated /quote request.
+        self._batch_size = int(os.getenv("TWELVEDATA_BATCH_SIZE", _BATCH_CHUNK))
         self.enable_market_movers = enable_market_movers or os.getenv(
             "TWELVEDATA_ENABLE_MARKET_MOVERS", ""
         ).lower() in ("1", "true", "yes")
@@ -115,28 +118,49 @@ class TwelveDataProvider(DataProvider):
             raise ProviderUnsupported
         return q
 
-    def get_quotes_batch(self, tickers: list[str]) -> dict[str, Quote]:
-        """Fetch up to 120 symbols per request via comma-separated /quote."""
-        out: dict[str, Quote] = {}
-        symbols = [t.strip().upper() for t in tickers if t and t.strip()]
-        for i in range(0, len(symbols), _BATCH_CHUNK):
-            chunk = symbols[i:i + _BATCH_CHUNK]
-            if not chunk:
-                continue
-            d = self._q("quote", 1, "/quote",
-                        {"symbol": ",".join(chunk), "country": "United States"})
-            if isinstance(d, dict) and d.get("symbol"):
-                q = self._parse_quote(str(d["symbol"]).upper(), d)
+    def _merge_quote_payload(self, out: dict[str, Quote], d) -> None:
+        if isinstance(d, dict) and d.get("symbol"):       # single-symbol response
+            q = self._parse_quote(str(d["symbol"]).upper(), d)
+            if q:
+                out[q.ticker] = q
+            return
+        if isinstance(d, dict):                            # {symbol: payload, ...}
+            for sym, payload in d.items():
+                if sym in ("status", "code", "message") or not isinstance(payload, dict):
+                    continue
+                q = self._parse_quote(str(payload.get("symbol") or sym).upper(), payload)
                 if q:
                     out[q.ticker] = q
+
+    def get_quotes_batch(self, tickers: list[str]) -> dict[str, Quote]:
+        """Fetch many symbols via comma-separated /quote.
+
+        Adaptive + fault-tolerant: if the plan rejects a large request the chunk
+        size shrinks (and stays shrunk) instead of throwing away the whole batch;
+        a single unparseable symbol is skipped rather than failing the rest.
+        """
+        out: dict[str, Quote] = {}
+        symbols = [t.strip().upper() for t in tickers if t and t.strip()]
+        if not hasattr(self, "_batch_size"):
+            self._batch_size = _BATCH_CHUNK
+        i = 0
+        while i < len(symbols):
+            size = max(1, self._batch_size)
+            chunk = symbols[i:i + size]
+            try:
+                d = self._q("quote", 1, "/quote",
+                            {"symbol": ",".join(chunk), "country": "United States"})
+            except Exception as e:
+                if getattr(self, "_rate_limited_until", 0.0) > time.time():
+                    break                                  # cooling down, not a size issue — stop
+                if size > 1:                               # request too big — halve and retry
+                    self._batch_size = max(1, size // 2)
+                    continue
+                log.debug("twelvedata quote failed for %s: %s", chunk[0], e)
+                i += 1                                     # skip a single bad symbol
                 continue
-            if isinstance(d, dict):
-                for sym, payload in d.items():
-                    if sym in ("status", "code", "message") or not isinstance(payload, dict):
-                        continue
-                    q = self._parse_quote(str(payload.get("symbol") or sym).upper(), payload)
-                    if q:
-                        out[q.ticker] = q
+            self._merge_quote_payload(out, d)
+            i += len(chunk)
         return out
 
     def invalidate_quote(self, ticker: str) -> None:

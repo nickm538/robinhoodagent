@@ -26,19 +26,18 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # MANDATE ROUTING: FinancialDatasets.AI is the PRIMARY source everywhere it is
-  # capable (paid plan); Mboum (pro plan) sits right behind it and owns the
-  # sections FD lacks (listing, analyst, short interest, provider technicals).
-  # TwelveData is COMPLEMENTARY: batch quote prefetch for the intraday radar,
-  # quote/price fallback, and technicals enrichment. Alpha Vantage fills unique
-  # gaps (structured news sentiment, macro, cheap movers feed).
-  # Cost note: the radar's high-frequency quote reads are served mostly by the
-  # TwelveData batch prefetch cache; FD/Mboum are hit per-name only when the
-  # prefetch is missing or stale, which keeps FD-first routing affordable.
+  # MANDATE ROUTING: MBOUM + FinancialDatasets.AI are the backbone. FD is PRIMARY
+  # for its deep-data specialty (fundamentals, insider, institutional, news) —
+  # low-frequency / daily-cached, so cheap. MBOUM owns the HIGH-FREQUENCY reads
+  # (quote / quote_risk / prices); FD is kept OFF those lists because per-name
+  # quotes across the wide universe were the dominant API spend ($40/40min).
+  # TwelveData is COMPLEMENTARY: its batch-quote prefetch warms the radar (the
+  # scan rides those batches before this priority is consulted), plus fallback.
+  # Alpha Vantage fills unique gaps (news, macro, movers).
   fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
-  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
-  quote:          ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
-  quote_risk:     ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
+  prices:         ["mboum", "twelvedata", "alphavantage"]
+  quote:          ["mboum", "twelvedata", "alphavantage"]
+  quote_risk:     ["mboum", "twelvedata", "alphavantage"]
   technicals:     ["mboum", "twelvedata", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
   insider:        ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (1440m TTL)

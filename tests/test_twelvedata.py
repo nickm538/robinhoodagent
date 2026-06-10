@@ -143,3 +143,27 @@ def test_twelvedata_rate_limit_enters_cooldown_and_skips_repeat_calls():
     with pytest.raises(ProviderUnsupported, match="cooling down"):
         p.get_prices("MSFT")
     assert p.http.calls == 1
+
+
+
+def test_get_quotes_batch_adapts_and_tolerates_chunk_failure():
+    """A plan that rejects large comma-batches must shrink the request and keep
+    the quotes from chunks that do succeed (not throw the whole batch away)."""
+    p = TwelveDataProvider.__new__(TwelveDataProvider)
+    p._batch_size = 4
+    sizes_seen: list[int] = []
+
+    def fake_q(section, ttl, path, params):
+        syms = params["symbol"].split(",")
+        sizes_seen.append(len(syms))
+        if len(syms) > 2:
+            raise ProviderUnsupported("batch too large")
+        return {s: {"symbol": s, "close": "100.0", "volume": "1000"} for s in syms}
+
+    p._q = fake_q
+    out = p.get_quotes_batch(["AAA", "BBB", "CCC", "DDD", "EEE"])
+
+    assert set(out) == {"AAA", "BBB", "CCC", "DDD", "EEE"}
+    assert all(q.price == 100.0 for q in out.values())
+    assert p._batch_size <= 2
+    assert max(sizes_seen) == 4 and min(sizes_seen) <= 2
