@@ -43,6 +43,26 @@ def test_fresh_quotes_after_gather_clear_stale_eligibility():
     assert scorer.eligible([verdict])
 
 
+def test_add_uses_no_trade_band_not_entry_band():
+    """Adds to existing positions honour no_trade_band; entries use entry_band."""
+    cfg = load_config()
+    cfg.raw["portfolio"]["rebalance"].update({
+        "no_trade_band": 0.05,
+        "entry_no_trade_band": 0.0,
+        "min_order_notional": 10.0,
+    })
+    acct = Account(equity=500.0, cash=200.0, buying_power=200.0, positions=[
+        Position("HOLD", 0.6, 50.0, 50.0),  # $30 = 6% of equity
+    ])
+    targets = [TargetPosition(ticker="HOLD", weight=0.10, score=70.0)]  # 4% drift < 5% band
+    orders = build_orders(acct, targets, cfg, lambda t: 50.0)
+    assert not [o for o in orders if o.side == "buy"]
+
+    targets.append(TargetPosition(ticker="NEW", weight=0.04, score=80.0, sector="Tech"))
+    orders2 = build_orders(acct, targets, cfg, lambda t: 50.0)
+    assert any(o.ticker == "NEW" for o in orders2 if o.side == "buy")
+
+
 def test_entry_no_trade_band_allows_immediate_new_buys():
     cfg = load_config()
     cfg.raw["portfolio"]["rebalance"]["no_trade_band"] = 0.05
@@ -104,6 +124,27 @@ def test_intraday_prescreen_prefers_runners_over_slow_momentum():
 
     out = build_universe(_MD(), cfg, raw=["SLOW", "RUN"])
     assert out[0] == "RUN"
+
+
+def test_rotation_opt_in_only_when_configured():
+    cfg = load_config()
+    cfg.raw.pop("hunter", None)
+    agent = TradingAgent.__new__(TradingAgent)
+    agent.cfg = cfg
+    held_v = Verdict("OLD", 55.0, {}, pillars_passing=2)
+    scan = ScanResult(
+        regime=RegimeResult("neutral", {}, 0.85),
+        verdicts=[held_v],
+        eligible=[],
+        targets=[TargetPosition(ticker="NEW", weight=0.25, score=65.0, sector="Tech")],
+        equity=500.0,
+        universe_size=2,
+        scored_size=2,
+    )
+    acct = Account(equity=500.0, cash=100.0, buying_power=100.0, positions=[
+        Position("OLD", 1.0, 50.0, 52.0),
+    ])
+    assert not agent._should_rotate_for_runner("OLD", held_v, scan, acct)
 
 
 def test_rotation_sells_stale_hold_for_stronger_runner():
