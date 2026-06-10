@@ -26,18 +26,22 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # COST CONTROL + PAID DATA ROUTING: FinancialDatasets.AI is removed from the
-  # high-frequency quote/prices/fundamentals lists where it was dominating API
-  # spend once the universe widened. TwelveData is first for live quotes and
-  # price history because the deployment has a paid account; MBOUM remains the
-  # primary fundamentals/listing source, while Alpha Vantage fills unique gaps
-  # (news, macro, cheap movers). Re-add "financialdatasets" to any list below to
-  # use it again.
-  fundamentals:   ["mboum", "alphavantage"]
-  prices:         ["twelvedata", "mboum", "alphavantage"]
-  quote:          ["twelvedata", "mboum", "alphavantage"]
-  quote_risk:     ["twelvedata", "mboum", "alphavantage"]
-  technicals:     ["twelvedata", "mboum", "alphavantage"]   # computed locally first; provider values enrich gaps
+  # DATA ROUTING (per mandate): MBOUM + FinancialDatasets.AI are the backbone.
+  # MBOUM is the high-frequency workhorse (quotes/prices/technicals/analyst);
+  # FinancialDatasets.AI is primary for its deep-data specialty (fundamentals,
+  # insider, institutional) — low-frequency, so cheap. TwelveData is fallback /
+  # gap-fill; its real value is the batch-quote prefetch that warms the radar
+  # (get_quote checks that cache before this priority, so the wide scan still
+  # rides TwelveData batches even though MBOUM is listed first). Alpha Vantage
+  # fills unique gaps (news, macro, movers).
+  # NOTE: FD is intentionally kept OFF the high-frequency quote/prices lists —
+  # that was the dominant API spend when the universe widened. Add it there only
+  # if you accept that cost.
+  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]  # FD primary (its specialty); 1440m TTL -> cheap
+  prices:         ["mboum", "twelvedata", "alphavantage"]         # MBOUM primary; TwelveData gap-fill
+  quote:          ["mboum", "twelvedata", "alphavantage"]
+  quote_risk:     ["mboum", "twelvedata", "alphavantage"]
+  technicals:     ["mboum", "twelvedata", "alphavantage"]   # computed locally first; provider values enrich gaps
   insider:        ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD re-enabled: lower-frequency smart-money (1440m TTL)
   news_sentiment: ["alphavantage", "mboum", "web"]  # web is last resort and disabled unless explicitly enabled
