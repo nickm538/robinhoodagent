@@ -43,6 +43,30 @@ def test_twelvedata_single_symbol_batch_shape():
     assert out["NVDA"].price == 900.0
 
 
+def test_get_quotes_batch_adapts_and_tolerates_chunk_failure():
+    """A plan that rejects large comma-batches must shrink the request and keep
+    the quotes from the chunks that do succeed (not throw the whole batch away)."""
+    from rh_agent.providers.base import ProviderUnsupported
+    p = TwelveDataProvider.__new__(TwelveDataProvider)
+    p._batch_size = 4                      # starts too big for this fake plan
+    sizes_seen: list[int] = []
+
+    def fake_q(section, ttl, path, params):
+        syms = params["symbol"].split(",")
+        sizes_seen.append(len(syms))
+        if len(syms) > 2:                  # plan caps at 2 symbols/request
+            raise ProviderUnsupported("batch too large")
+        return {s: {"symbol": s, "close": "100.0", "volume": "1000"} for s in syms}
+
+    p._q = fake_q
+    out = p.get_quotes_batch(["AAA", "BBB", "CCC", "DDD", "EEE"])
+
+    assert set(out) == {"AAA", "BBB", "CCC", "DDD", "EEE"}   # nothing dropped
+    assert all(q.price == 100.0 for q in out.values())
+    assert p._batch_size <= 2                                # learned the smaller size
+    assert max(sizes_seen) == 4 and min(sizes_seen) <= 2     # tried big, then shrank
+
+
 def test_twelvedata_market_movers_parsing_when_enabled():
     p = TwelveDataProvider.__new__(TwelveDataProvider)
     p.enable_market_movers = True
