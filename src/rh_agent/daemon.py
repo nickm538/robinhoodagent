@@ -4,7 +4,7 @@ Runs hands-off and non-stop. Each cycle it:
   1. refreshes the account from the broker;
   2. manages risk on open positions every tick (trailing/hard stops, take-profits)
      — this happens intraday, not just at rebalance;
-  3. on the configured cadence (hourly by default), re-scans the universe, rebuilds the
+  3. on the configured cadence (intraday by default), re-scans the universe, rebuilds the
      target book, and reconciles/executes orders;
   4. enforces a daily-drawdown circuit breaker that suspends new buying (sells still run);
   5. persists state and sleeps until the next tick.
@@ -110,6 +110,9 @@ class AlwaysOnAgent:
         # silently halt all hunting until a manual restart. Abandon one that runs
         # longer than this and let a fresh scan start next cycle.
         self._scan_timeout = float(self.cfg.get("daemon.scan_timeout_seconds", 1800))
+        # A finished scan must not wait forever behind a protective-sell tick.
+        self._pending_scan_max_age = float(self.cfg.get("daemon.pending_scan_max_seconds", 300))
+        self._pending_scan_at: datetime | None = None
         self.journal = Journal(self.cfg)
 
     # -- cadence --
@@ -193,9 +196,11 @@ class AlwaysOnAgent:
             if self._scan_future.done():
                 try:
                     self._pending_scan = self._scan_future.result()
+                    self._pending_scan_at = now
                 except Exception as e:
                     log.error("background scan failed: %s", e, exc_info=True)
                     self._pending_scan = None
+                    self._pending_scan_at = None
                 self._scan_future = None
                 self._scan_started_at = None
             elif (self._scan_started_at is not None
@@ -210,11 +215,18 @@ class AlwaysOnAgent:
                 self._scan_started_at = None
                 self._pending_scan = None
 
-        # 3) execute a harvested scan — but not on the same tick as a protective
-        #    sell (let it settle first; the finished scan waits for a clean tick).
-        if self._pending_scan is not None and not risk_actions:
+        # 3) execute a harvested scan — prefer a clean tick after a protective
+        #    sell, but never let a finished hunt rot while risk orders retry.
+        pending_at = getattr(self, "_pending_scan_at", None)
+        pending_age = (now - pending_at).total_seconds() if pending_at else 0.0
+        pending_stale = pending_age > float(getattr(self, "_pending_scan_max_age", 300))
+        if self._pending_scan is not None and (not risk_actions or pending_stale):
+            if pending_stale and risk_actions:
+                log.warning("pending scan aged %.0fs — executing despite risk actions",
+                            pending_age)
             scan = self._pending_scan
             self._pending_scan = None
+            self._pending_scan_at = None
             # Drop cached quotes so order sizing/reconciliation uses a fresh
             # main-thread price snapshot.
             self.agent.clear_price_cache()
