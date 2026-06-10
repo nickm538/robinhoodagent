@@ -8,7 +8,12 @@ from ..models import Order
 
 
 def order_succeeded(result: dict | None, *, executing: bool = True) -> bool:
-    """True when a broker response indicates the order was accepted (not rejected)."""
+    """True when a broker response indicates the order was accepted (not rejected).
+
+    Note: ``submitted`` means the broker accepted the request, not that the
+    order has filled. Callers that clear protective stop state should treat
+    rejections/errors differently from submissions.
+    """
     if not result:
         return False
     status = (result.get("status") or "").lower()

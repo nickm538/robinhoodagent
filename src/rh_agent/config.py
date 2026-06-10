@@ -119,6 +119,17 @@ class Config:
             and os.getenv("LIVE_TRADING_CONFIRM", "") == "I_UNDERSTAND_REAL_MONEY"
         )
 
+    def provider_cache_ttl(self, section: str, default: float) -> float:
+        """Cache TTL in minutes for a provider section (from config.yaml)."""
+        ttl_map = self.get("providers.cache_ttl_minutes", {}) or {}
+        val = ttl_map.get(section)
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
 
 def load_config(path: str | Path | None = None) -> Config:
     p = Path(path) if path else DEFAULT_CONFIG

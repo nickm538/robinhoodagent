@@ -23,7 +23,8 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
     fd_key = cfg.api_key("financialdatasets")
     if fd_key:
         from .financial_datasets import FinancialDatasetsProvider
-        providers["financialdatasets"] = FinancialDatasetsProvider(fd_key, cache)
+        ttls = cfg.get("providers.cache_ttl_minutes", {}) or {}
+        providers["financialdatasets"] = FinancialDatasetsProvider(fd_key, cache, cache_ttls=ttls)
 
     mb_key = cfg.api_key("mboum")
     if mb_key:

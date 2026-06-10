@@ -117,10 +117,12 @@ python -m rh_agent.cli backtest
 python -m rh_agent.cli status
 ```
 
-Default `.env` (from `.env.example`) uses `EXECUTION_MODE=live` and
-`LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` — **real orders** in your Robinhood
-*Agentic* account after `rh-agent auth`. For safe testing, set `EXECUTION_MODE=paper`
-and clear `LIVE_TRADING_CONFIRM`.
+`.env.example` defaults to **`EXECUTION_MODE=paper`** (safe). For your production VM,
+set `EXECUTION_MODE=live` and `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` after
+`rh-agent auth` — that arms **real orders** in your Robinhood *Agentic* account.
+`config/config.yaml` may still say `execution.mode: live`; the `.env` values win.
+
+Emergency flatten: `python -m rh_agent.cli cancel-open` (live armed only).
 
 ### Try it right now with the bundled live snapshot
 
@@ -174,7 +176,8 @@ On your own server/VPS there is no such restriction.
 * **Real money, real risk.** You can lose money. Use `EXECUTION_MODE=paper` to test.
 * **No performance guarantee.** The 2× S&P "north star" is an aspiration, not a
   promise. Backtests have selection/look-ahead caveats (see `RESULTS.md`).
-* **Defense in depth:** explicit live opt-in via `.env` · Robinhood's
+* **Defense in depth:** paper `.env.example` default · explicit live opt-in ·
+  pre-execution quote refresh · order acceptance checks · `cancel-open` · Robinhood's
   separate Agentic account · per-name (10%) and per-sector (35%) caps · ATR
   trailing stops · hard -18% stop · daily drawdown halt · liquidity floor
   (no penny stocks / illiquid names).

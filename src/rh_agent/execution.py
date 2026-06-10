@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from .broker.orders import order_succeeded
 from .config import Config
 from .logging_setup import get_logger
 from .models import Account, Order, TargetPosition
@@ -97,3 +98,60 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     log.info("orders: %d (%d sells, %d buys)", len(orders),
              sum(1 for o in orders if o.side == "sell"), len(buys))
     return orders
+
+
+def execute_orders(
+    broker,
+    orders: list[Order],
+    cfg: Config,
+    *,
+    account: Account | None = None,
+    get_account: Callable[[], Account] | None = None,
+) -> tuple[list[dict], Account | None]:
+    """Place orders sequentially with live-safety checks.
+
+    For live brokers: re-check arming before each order, refresh the account
+    snapshot before each buy (buying-power drift), verify broker acceptance,
+    and return a post-trade account when possible.
+    """
+    if not orders:
+        return [], account
+
+    live = cfg.live_trading_armed and getattr(broker, "supports_live", False)
+    fills: list[dict] = []
+    post = account
+
+    for o in orders:
+        if live and not cfg.live_trading_armed:
+            log.error("live trading disarmed mid-batch — aborting remaining orders")
+            break
+
+        if live and o.side == "buy" and get_account:
+            try:
+                fresh = get_account()
+                post = fresh
+                if not fresh.reliable:
+                    log.error("unreliable account before buy %s — skipping buy", o.ticker)
+                    fills.append({
+                        "status": "skipped",
+                        "ticker": o.ticker,
+                        "side": o.side,
+                        "reason": "unreliable_account",
+                    })
+                    continue
+            except Exception as e:
+                log.warning("account refresh before buy %s failed: %s", o.ticker, e)
+
+        res = broker.place_order(o, dry_run=False)
+        fills.append(res)
+        if not order_succeeded(res, executing=True):
+            log.error("order not accepted: %s %s qty=%s — %s",
+                      o.side, o.ticker, o.quantity, res)
+
+    if get_account:
+        try:
+            post = get_account()
+        except Exception as e:
+            log.warning("post-trade account refresh failed: %s", e)
+
+    return fills, post

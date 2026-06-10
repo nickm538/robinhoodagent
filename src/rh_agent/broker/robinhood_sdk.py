@@ -174,6 +174,28 @@ class RobinhoodSDKBroker(Broker):
                 return []
         return self._run(fn)
 
+    def cancel_all(self) -> None:
+        async def fn(session):
+            try:
+                orders = await self._call(session, "orders", {}) or []
+            except Exception as e:
+                log.warning("cancel_all: could not list open orders: %s", e)
+                return
+            if not isinstance(orders, list):
+                return
+            for o in orders:
+                if not isinstance(o, dict):
+                    continue
+                oid = o.get("id")
+                if not oid:
+                    continue
+                try:
+                    await self._call(session, "cancel", {"order_id": oid, "id": oid})
+                except Exception as e:
+                    log.warning("cancel_all: failed to cancel order %s: %s", oid, e)
+
+        self._run(fn)
+
 
 def _shape(o, depth: int = 0):
     """Structure (field names + types) of a value, WITHOUT the actual values —
