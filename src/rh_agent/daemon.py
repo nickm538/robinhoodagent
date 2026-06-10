@@ -230,10 +230,20 @@ class AlwaysOnAgent:
             # Drop cached quotes so order sizing/reconciliation uses a fresh
             # main-thread price snapshot.
             self.agent.clear_price_cache()
+            # Refresh account after the background scan delay so buying-power
+            # and positions reflect the live book at execution time.
+            try:
+                account = broker.get_account()
+            except Exception as e:
+                log.warning("pre-reconcile account refresh failed: %s", e)
+                if broker.supports_live and not account.reliable:
+                    log.error("unreliable account — skipping stale-scan execution")
+                    self.state.save()
+                    return
             run = self.agent.reconcile_and_execute(
                 scan, execute=execute, allow_buys=not halted, exclude_tickers=pending,
                 broker=broker, account=account)
-            self._apply_rebalance_result(run, account)
+            self._apply_rebalance_result(run, account, now=now)
         # 4) otherwise, kick off a new scan when due (and none is in flight/pending)
         elif (due_for_rebalance and self._scan_future is None
               and self._pending_scan is None and not risk_actions):
@@ -243,8 +253,6 @@ class AlwaysOnAgent:
             log.info("rebalance due — scanning in background (allow_buys=%s)", not halted)
             self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held)
             self._scan_started_at = now
-            # Anchor cadence to scan START so a slow scan doesn't compress the interval.
-            self.state.last_rebalance = now.isoformat()
         else:
             log.info("monitoring %d positions (next rebalance pending)", len(account.positions))
 
@@ -261,7 +269,7 @@ class AlwaysOnAgent:
         )
         return scan_agent.scan(equity=equity, include_tickers=held)
 
-    def _apply_rebalance_result(self, run, account) -> None:
+    def _apply_rebalance_result(self, run, account, *, now: datetime | None = None) -> None:
         for tp in run.scan.targets:
             if tp.stop_price:
                 self.state.stops[tp.ticker] = tp.stop_price
@@ -290,6 +298,9 @@ class AlwaysOnAgent:
         self.state.pending_risk = {k: v for k, v in self.state.pending_risk.items() if k in held}
         # Journal the executed orders with their decision context (self-improving log).
         self.journal.record_rebalance(run, held_account or account, self.agent.price_fn)
+        if now is not None:
+            # Anchor cadence to scan COMPLETION so a slow hunt doesn't compress the interval.
+            self.state.last_rebalance = now.isoformat()
         log.info("rebalanced: %d targets, %d orders (%s)",
                  len(run.scan.targets), len(run.orders), run.mode)
 

@@ -51,9 +51,29 @@ _FUND_MAP = {
 class FinancialDatasetsProvider(DataProvider):
     name = "financialdatasets"
 
-    def __init__(self, api_key: str, cache: DiskCache | None = None):
+    _TTL_KEY = {
+        "snap": "quote",
+        "facts": "fundamentals",
+        "metrics": "fundamentals",
+        "inst": "institutional",
+        "news": "news_sentiment",
+    }
+
+    def __init__(self, api_key: str, cache: DiskCache | None = None, *,
+                 cache_ttls: dict | None = None):
         super().__init__(cache)
         self.http = HttpClient(BASE, max_per_sec=8, default_headers={"X-API-KEY": api_key})
+        self._cache_ttls = cache_ttls or {}
+
+    def _ttl(self, section: str, default: float) -> float:
+        key = self._TTL_KEY.get(section, section)
+        val = (getattr(self, "_cache_ttls", None) or {}).get(key)
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
 
     def _cached(self, section: str, ticker: str, ttl: float, path: str, params: dict) -> Any:
         key = f"{path}|{sorted(params.items())}"
@@ -65,7 +85,7 @@ class FinancialDatasetsProvider(DataProvider):
         return data
 
     def get_company(self, ticker: str) -> dict:
-        d = self._cached("facts", ticker, 1440, "/company/facts/", {"ticker": ticker})
+        d = self._cached("facts", ticker, self._ttl("facts", 1440), "/company/facts/", {"ticker": ticker})
         f = d.get("company_facts", d) if isinstance(d, dict) else {}
         return {
             "name": f.get("name"),
@@ -78,15 +98,24 @@ class FinancialDatasetsProvider(DataProvider):
         }
 
     def get_quote(self, ticker: str) -> Quote:
-        d = self._cached("snap", ticker, 10, "/prices/snapshot/", {"ticker": ticker})
+        d = self._cached("snap", ticker, self._ttl("snap", 10), "/prices/snapshot/", {"ticker": ticker})
         s = d.get("snapshot", d) if isinstance(d, dict) else {}
         price = s.get("price")
         if price is None:
             raise ProviderUnsupported
+        px = float(price)
+        pct = s.get("day_change_percent")
+        day_change_pct = float(pct) if pct is not None else None
+        prev_close = None
+        if day_change_pct is not None and day_change_pct != -100.0:
+            prev_close = px / (1.0 + day_change_pct / 100.0)
+        elif s.get("day_change") is not None:
+            # Fallback: absolute dollar change when percent is absent.
+            prev_close = px - float(s["day_change"])
         return Quote(
-            ticker=ticker, price=float(price), volume=float(s.get("volume") or 0),
-            day_change_pct=s.get("day_change_percent"),
-            prev_close=(float(price) - s.get("day_change")) if s.get("day_change") else None,
+            ticker=ticker, price=px, volume=float(s.get("volume") or 0),
+            day_change_pct=day_change_pct,
+            prev_close=prev_close,
             source=self.name,
         )
 
@@ -109,12 +138,13 @@ class FinancialDatasetsProvider(DataProvider):
             start = (anchor - timedelta(days=730)).isoformat()
         params = {"ticker": ticker, "interval": interval, "interval_multiplier": 1,
                   "start_date": start, "end_date": end}
-        d = self._cached("prices", ticker, 720, "/prices/", params)
+        d = self._cached("prices", ticker, self._ttl("prices", 720), "/prices/", params)
         recs = d.get("prices", d) if isinstance(d, dict) else d
         return prices_to_df(recs or [])
 
     def get_fundamentals(self, ticker: str) -> dict:
-        d = self._cached("metrics", ticker, 1440, "/financial-metrics/snapshot/", {"ticker": ticker})
+        d = self._cached("metrics", ticker, self._ttl("metrics", 1440),
+                          "/financial-metrics/snapshot/", {"ticker": ticker})
         s = d.get("snapshot", d) if isinstance(d, dict) else {}
         out = {"source": self.name}
         for k, v in _FUND_MAP.items():
@@ -123,7 +153,8 @@ class FinancialDatasetsProvider(DataProvider):
         return out
 
     def get_insider(self, ticker: str) -> list:
-        d = self._cached("insider", ticker, 720, "/insider-trades/", {"ticker": ticker, "limit": 100})
+        d = self._cached("insider", ticker, self._ttl("insider", 720),
+                          "/insider-trades/", {"ticker": ticker, "limit": 100})
         trades = d.get("insider_trades", d) if isinstance(d, dict) else d
         out = []
         for t in (trades or []):
@@ -143,8 +174,8 @@ class FinancialDatasetsProvider(DataProvider):
 
     def get_institutional(self, ticker: str) -> dict:
         try:
-            d = self._cached("inst", ticker, 1440, "/institutional-ownership/",
-                             {"ticker": ticker, "limit": 50})
+            d = self._cached("inst", ticker, self._ttl("inst", 1440),
+                             "/institutional-ownership/", {"ticker": ticker, "limit": 50})
         except Exception:
             raise ProviderUnsupported
         recs = d.get("institutional_ownership", d) if isinstance(d, dict) else d
@@ -168,13 +199,13 @@ class FinancialDatasetsProvider(DataProvider):
         params = {"limit": capped}
         if ticker:
             params["ticker"] = ticker
-        d = self._cached("news", ticker or "_market", 120, "/news/", params)
+        d = self._cached("news", ticker or "_market", self._ttl("news", 120), "/news/", params)
         items = d.get("news", d) if isinstance(d, dict) else d
         return [it.get("title") or it.get("headline") for it in (items or [])[:limit]
                 if isinstance(it, dict) and (it.get("title") or it.get("headline"))]
 
     def get_news_sentiment(self, ticker: str) -> dict:
-        d = self._cached("news", ticker, 120, "/news/",
+        d = self._cached("news", ticker, self._ttl("news", 120), "/news/",
                          {"ticker": ticker, "limit": self._NEWS_LIMIT_CAP})
         items = d.get("news", d) if isinstance(d, dict) else d
         if not items:

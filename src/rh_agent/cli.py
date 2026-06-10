@@ -100,22 +100,57 @@ def cmd_scan(args) -> int:
     return 0
 
 
-def cmd_run(args) -> int:
+def _run_cycle(args):
     from . import report
     from .broker.errors import LiveBrokerUnavailable
     agent, cfg = _agent(args)
     if args.execute and cfg.execution_mode == "live" and not cfg.live_trading_armed:
         print("Refusing: EXECUTION_MODE=live but LIVE_TRADING_CONFIRM is not set to "
               "'I_UNDERSTAND_REAL_MONEY'. Aborting.")
-        return 2
+        return 2, None
     try:
         run = agent.run(execute=args.execute, tickers=_watchlist(args))
     except LiveBrokerUnavailable as e:
         print(f"Refusing: {e}")
-        return 2
+        return 2, None
     report.render_run(run)
     path = report.write_markdown(run.scan, run=run)
     print(f"\nMarkdown brief written to {path}")
+    return 0, run
+
+
+def cmd_run(args) -> int:
+    from .process_lock import ProcessLockError, daemon_lock
+    if args.execute:
+        try:
+            with daemon_lock():
+                code, _ = _run_cycle(args)
+                return code
+        except ProcessLockError as e:
+            print(f"Refusing: {e}")
+            return 2
+    code, _ = _run_cycle(args)
+    return code
+
+
+def cmd_cancel_open(args) -> int:
+    """Emergency: request cancellation of all open Robinhood orders."""
+    from .broker.errors import LiveBrokerUnavailable
+    agent, cfg = _agent(args)
+    if not cfg.live_trading_armed:
+        print("Refusing: cancel-open requires EXECUTION_MODE=live and "
+              "LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY.")
+        return 2
+    try:
+        broker = agent.make_broker()
+    except LiveBrokerUnavailable as e:
+        print(f"Refusing: {e}")
+        return 2
+    if not broker.supports_live:
+        print("No live broker — nothing to cancel.")
+        return 0
+    broker.cancel_all()
+    print("Cancel requests sent for all listed open orders.")
     return 0
 
 
@@ -210,6 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tickers", help="comma-separated watchlist")
     s.add_argument("--execute", action="store_true", help="place orders (paper unless live armed)")
     s.set_defaults(func=cmd_run)
+
+    sub.add_parser("cancel-open",
+                   help="emergency: cancel all open Robinhood orders (live armed only)"
+                   ).set_defaults(func=cmd_cancel_open)
 
     s = sub.add_parser("backtest")
     s.add_argument("--snapshot")

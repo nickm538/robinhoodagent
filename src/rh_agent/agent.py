@@ -11,7 +11,7 @@ import pandas as pd
 
 from .config import Config
 from .data.market_data import MarketData
-from .execution import build_orders
+from .execution import build_orders, execute_orders
 from .logging_setup import get_logger
 from .models import Account, Order, Position, TargetPosition, TickerData, Verdict
 from .portfolio import PortfolioBuilder
@@ -406,6 +406,7 @@ class TradingAgent:
         if equity is None:
             equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
         scan = self._apply_hold_discipline(scan, account, equity)
+        self._refresh_execution_quotes(scan, account)
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
                               allow_buys=allow_buys, exclude_tickers=exclude_tickers)
 
@@ -415,18 +416,33 @@ class TradingAgent:
         fills: list[dict] = []
         post_account: Account | None = None
         if execute:
-            for o in orders:
-                fills.append(broker.place_order(o, dry_run=False))
-            try:
-                post_account = broker.get_account()
-            except Exception as e:
-                log.warning("post-trade account refresh failed: %s", e)
+            if live and not self.cfg.live_trading_armed:
+                log.error("live trading disarmed — refusing order placement")
+                fills, post_account = execute_orders(
+                    broker, orders, self.cfg, account=account,
+                    get_account=broker.get_account,
+                )
         mode = "live" if live else "paper"
         if execute and not live:
             log.info("executed in PAPER mode (simulated fills on live prices)")
         return RunResult(scan=scan, account=account, post_account=post_account,
                          orders=orders, fills=fills,
                          executed=execute, mode=mode)
+
+    def _refresh_execution_quotes(self, scan: ScanResult, account: Account) -> None:
+        """Refresh quotes for held + target names immediately before order sizing."""
+        if "snapshot" in self.providers:
+            return
+        tickers = {p.ticker for p in account.positions}
+        tickers.update(t.ticker for t in scan.targets)
+        if not tickers:
+            return
+        freshness = self.cfg.get("data.freshness", {}) or {}
+        max_age = float(freshness.get("quote_max_age_seconds", 120))
+        refresh = getattr(self.md, "refresh_quotes", None)
+        if refresh:
+            refresh(list(tickers), max_age_seconds=max_age)
+            self.clear_price_cache()
 
     def _apply_hold_discipline(self, scan: ScanResult, account: Account, equity: float) -> ScanResult:
         """Use a lower exit bar than the buy bar so intraday scans do not churn.

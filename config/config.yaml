@@ -42,7 +42,7 @@ providers:
   technicals:     ["mboum", "twelvedata", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
   insider:        ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "financialdatasets", "mboum", "web"]  # AV first (structured scores); web is opt-in last resort
+  news_sentiment: ["alphavantage", "financialdatasets", "web"]  # AV first (structured scores); Mboum has no sentiment endpoint; web opt-in last resort
   news_headlines: ["financialdatasets", "alphavantage", "web"]           # FD news primary; AV enriches; web only adds AI context
   analyst_ratings: ["mboum"]
   short_interest: ["mboum"]
@@ -63,6 +63,8 @@ providers:
   # Exa/Firecrawl are intentionally narrow: they enrich only parsed pro-source
   # score fields by default. Generic web-news sentiment is off to avoid noise
   # and look-forward bias; Alpha Vantage remains the structured news feed.
+  # Reference TTLs (minutes). FinancialDatasets reads these via build_providers(cache_ttls)
+  # and FinancialDatasetsProvider._ttl; other providers still use module defaults until wired.
   cache_ttl_minutes:
     quote: 3
     prices: 720

@@ -155,7 +155,10 @@ class AlphaVantageProvider(DataProvider):
                     sc = _num(ts.get("ticker_sentiment_score")) or 0
                     wsum += rel * sc
                     w += rel
-        return {"score": (wsum / w) if w else None, "article_count": len(feed),
+        score = (wsum / w) if w else None
+        if score is None:
+            raise ProviderUnsupported
+        return {"score": score, "article_count": len(feed),
                 "relevance_weighted": True, "source": self.name}
 
     def get_earnings(self, ticker: str) -> dict:

@@ -21,7 +21,14 @@ def _is_empty(res: Any) -> bool:
         return True
     if isinstance(res, (pd.DataFrame, pd.Series)):
         return res.empty
-    if isinstance(res, (dict, list, str, tuple)):
+    if isinstance(res, dict):
+        if not res:
+            return True
+        # News-sentiment payloads with metadata but no usable score should fall through.
+        if res.get("score") is None and any(k in res for k in ("article_count", "relevance_weighted")):
+            return True
+        return False
+    if isinstance(res, (list, str, tuple)):
         return len(res) == 0
     return False
 

@@ -25,9 +25,11 @@ def test_financialdatasets_is_primary_for_core_sections():
 def test_mboum_backs_up_every_core_section():
     p = _providers()
     for section in ("fundamentals", "prices", "quote", "quote_risk",
-                    "technicals", "insider", "institutional", "news_sentiment"):
+                    "technicals", "insider", "institutional"):
         assert "mboum" in p[section], f"{section}: mboum (pro) missing from {p[section]}"
     assert p["universe"][0] == "mboum"
+    # Mboum has no get_news_sentiment — must not appear in that chain.
+    assert "mboum" not in p.get("news_sentiment", [])
 
 
 def test_twelvedata_stays_complementary_not_primary():
