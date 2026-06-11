@@ -41,7 +41,9 @@ Or invoke tools directly via `.venv/bin/python` / `.venv/bin/rh-agent`.
 
 - Copy `.env.example` → `.env` and fill API keys for live data providers.
 - Strategy tuning lives in `config/config.yaml`.
-- `.env.example` and `config/config.yaml` default to live + armed production mode.
+- `config/config.yaml` defaults to live mode; `.env.example` supplies the
+  required `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` confirmation string
+  for armed production mode.
 - Use `EXECUTION_MODE=paper` only for explicit non-production simulated fills.
 
 ### Running without API keys (offline / cloud demo)

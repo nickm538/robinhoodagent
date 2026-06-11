@@ -117,10 +117,11 @@ python -m rh_agent.cli backtest
 python -m rh_agent.cli status
 ```
 
-`.env.example` and `config/config.yaml` default to **live + armed** for the
-production VM. This places **real orders** in your Robinhood *Agentic* account
-after `rh-agent auth`. Use `EXECUTION_MODE=paper` only for explicit
-non-production testing.
+`config/config.yaml` defaults to **live mode**, and `.env.example` includes the
+required `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` confirmation string for
+the production VM. Together, after `rh-agent auth`, that places **real orders**
+in your Robinhood *Agentic* account. Use `EXECUTION_MODE=paper` only for
+explicit non-production testing.
 
 Emergency flatten: `python -m rh_agent.cli cancel-open` (live armed only).
 
