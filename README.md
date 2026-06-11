@@ -59,7 +59,7 @@ neutralises a factor rather than inventing a value.
 ## Quickstart
 
 ```bash
-git clone <this repo> && cd robinhood_agent
+git clone <this repo> && cd robinhoodagent
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
