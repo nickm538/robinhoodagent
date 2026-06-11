@@ -14,6 +14,8 @@ controls, and executes through the **Robinhood Agentic Trading MCP** in your
 
 ---
 
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/nickm538/robinhoodagent?utm_source=oss&utm_medium=github&utm_campaign=nickm538%2Frobinhoodagent&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+
 ## The Panel of Five (how it thinks)
 
 Every candidate is judged by five independent "analysts" — an ensemble that
