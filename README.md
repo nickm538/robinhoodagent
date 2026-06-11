@@ -117,10 +117,10 @@ python -m rh_agent.cli backtest
 python -m rh_agent.cli status
 ```
 
-`.env.example` defaults to **`EXECUTION_MODE=paper`** (safe). For your production VM,
-set `EXECUTION_MODE=live` and `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` after
-`rh-agent auth` — that arms **real orders** in your Robinhood *Agentic* account.
-`config/config.yaml` may still say `execution.mode: live`; the `.env` values win.
+`.env.example` and `config/config.yaml` default to **live + armed** for the
+production VM. This places **real orders** in your Robinhood *Agentic* account
+after `rh-agent auth`. Use `EXECUTION_MODE=paper` only for explicit
+non-production testing.
 
 Emergency flatten: `python -m rh_agent.cli cancel-open` (live armed only).
 
