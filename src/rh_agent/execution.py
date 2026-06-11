@@ -139,14 +139,33 @@ def execute_orders(
                         "reason": "unreliable_account",
                     })
                     continue
+                if not _cap_live_buy_to_buying_power(o, fresh, cfg):
+                    fills.append({
+                        "status": "skipped",
+                        "ticker": o.ticker,
+                        "side": o.side,
+                        "reason": "insufficient_buying_power",
+                    })
+                    continue
             except Exception as e:
-                log.warning("account refresh before buy %s failed: %s", o.ticker, e)
+                log.error("account refresh before live buy %s failed — skipping buy: %s",
+                          o.ticker, e)
+                fills.append({
+                    "status": "skipped",
+                    "ticker": o.ticker,
+                    "side": o.side,
+                    "reason": "account_refresh_failed",
+                })
+                continue
 
         res = broker.place_order(o, dry_run=False)
         fills.append(res)
         if not order_succeeded(res, executing=True):
             log.error("order not accepted: %s %s qty=%s — %s",
                       o.side, o.ticker, o.quantity, res)
+            if live:
+                log.error("aborting remaining live orders after rejected/error response")
+                break
 
     if get_account:
         try:
@@ -155,3 +174,22 @@ def execute_orders(
             log.warning("post-trade account refresh failed: %s", e)
 
     return fills, post
+
+
+def _cap_live_buy_to_buying_power(order: Order, account: Account, cfg: Config) -> bool:
+    """Conservatively cap a live market buy to the fresh buying-power snapshot."""
+    budget = max(float(account.buying_power or 0.0) * 0.97, 0.0)
+    min_notional = float(cfg.get("portfolio.rebalance.min_order_notional", 20.0))
+    if budget < min_notional:
+        log.error("buying power $%.2f below min order $%.2f before %s",
+                  budget, min_notional, order.ticker)
+        return False
+    if order.notional is None:
+        # Share-quantity buys cannot be safely rescaled without a fresh quote here.
+        return True
+    if order.notional <= budget:
+        return True
+    log.info("fresh buying-power cap before %s: $%.2f -> $%.2f",
+             order.ticker, order.notional, budget)
+    order.notional = round(budget, 2)
+    return order.notional >= min_notional

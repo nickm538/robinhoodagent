@@ -117,19 +117,25 @@ python -m rh_agent.cli backtest
 python -m rh_agent.cli status
 ```
 
-`.env.example` defaults to **`EXECUTION_MODE=paper`** (safe). For your production VM,
-set `EXECUTION_MODE=live` and `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` after
-`rh-agent auth` — that arms **real orders** in your Robinhood *Agentic* account.
-`config/config.yaml` may still say `execution.mode: live`; the `.env` values win.
+`config/config.yaml` defaults to **live mode**, and `.env.example` includes the
+required `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` confirmation string for
+the production VM. Together, after `rh-agent auth`, that places **real orders**
+in your Robinhood *Agentic* account. Use `EXECUTION_MODE=paper` only for
+explicit non-production testing.
 
 Emergency flatten: `python -m rh_agent.cli cancel-open` (live armed only).
 
-### Try it right now with the bundled live snapshot
+If `systemctl status rh-agent` shows `status=2`, the CLI refused to start on
+purpose. Check the exact message with `journalctl -u rh-agent -n 80 --no-pager`;
+the usual causes are missing `LIVE_TRADING_CONFIRM`, expired/missing OAuth
+(`python -m rh_agent.cli auth`), or a duplicate daemon lock.
 
-This repo ships a reproducible run on **real data captured 2026-06-02** (11
-liquid names + SPY/RSP, via FinancialDatasets.AI). See [`RESULTS.md`](RESULTS.md).
-To regenerate a snapshot from your own captured price files, use
-`scripts/assemble_snapshot.py`.
+### Try it right now with an offline snapshot
+
+No snapshot is committed to the repo. For offline demos, assemble one from
+captured provider responses with `scripts/assemble_snapshot.py`, then run
+`python -m rh_agent.cli scan --snapshot /path/to/snapshot.json`. See
+[`RESULTS.md`](RESULTS.md) for a historical example.
 
 ## Always-on, hands-off (the autonomous loop)
 
@@ -142,8 +148,8 @@ python -m rh_agent.cli loop --execute
 ```
 
 The loop runs **non-stop**: every cycle (default **1 min** poll, market-hours aware) it
-manages risk on open positions (ATR trailing/hard stops, take-profits), and every
-15 minutes by default it runs a dynamic intraday radar across the provider-listed
+manages risk on open positions (ATR trailing/hard stops, take-profits), and about every
+20 minutes by default it runs a dynamic intraday radar across the provider-listed
 equity universe, deep-scores the strongest candidates, rebuilds the book, and
 executes. A **daily-drawdown circuit breaker** suspends new buying after a -6%
 day (de-risking sells still run). It is crash-resistant — an error in one cycle is logged and the loop keeps

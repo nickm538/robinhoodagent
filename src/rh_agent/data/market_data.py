@@ -91,14 +91,17 @@ class MarketData:
         fn = getattr(td, "get_quotes_batch", None) if td else None
         if not fn or not tickers:
             return 0
+        req = len([t for t in tickers if t])
         try:
             batch = fn([t.upper() for t in tickers if t])
         except Exception as e:
-            log.debug("twelvedata batch quote prefetch failed: %s", e)
+            log.warning("twelvedata batch quote prefetch failed (%d names): %s", req, e)
             return 0
         self._quote_prefetch.update(batch)
         if batch:
-            log.info("prefetched %d quotes via twelvedata batch", len(batch))
+            log.info("prefetched %d/%d quotes via twelvedata batch", len(batch), req)
+        else:
+            log.warning("twelvedata batch prefetch returned 0/%d quotes", req)
         return len(batch)
 
     def refresh_quotes(self, tickers: list[str], *, max_age_seconds: float = 120) -> int:

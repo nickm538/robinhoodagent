@@ -28,6 +28,7 @@ def test_mboum_backs_up_every_core_section():
                     "technicals", "insider", "institutional"):
         assert "mboum" in p[section], f"{section}: mboum (pro) missing from {p[section]}"
     assert p["universe"][0] == "mboum"
+    assert p["news_sentiment"][0] == "alphavantage"
     # Mboum has no get_news_sentiment — must not appear in that chain.
     assert "mboum" not in p.get("news_sentiment", [])
 

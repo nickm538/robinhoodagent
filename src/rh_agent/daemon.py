@@ -225,8 +225,6 @@ class AlwaysOnAgent:
                 log.warning("pending scan aged %.0fs — executing despite risk actions",
                             pending_age)
             scan = self._pending_scan
-            self._pending_scan = None
-            self._pending_scan_at = None
             # Drop cached quotes so order sizing/reconciliation uses a fresh
             # main-thread price snapshot.
             self.agent.clear_price_cache()
@@ -236,10 +234,12 @@ class AlwaysOnAgent:
                 account = broker.get_account()
             except Exception as e:
                 log.warning("pre-reconcile account refresh failed: %s", e)
-                if broker.supports_live and not account.reliable:
-                    log.error("unreliable account — skipping stale-scan execution")
+                if broker.supports_live:
+                    log.error("live account refresh failed — skipping stale-scan execution")
                     self.state.save()
                     return
+            self._pending_scan = None
+            self._pending_scan_at = None
             run = self.agent.reconcile_and_execute(
                 scan, execute=execute, allow_buys=not halted, exclude_tickers=pending,
                 broker=broker, account=account)
