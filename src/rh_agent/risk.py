@@ -43,6 +43,20 @@ def trailing_stop(high_water: float, atr: float | None, mult: float, hard_pct: f
     return round(hard, 2)
 
 
+def breakeven_stop(avg_price: float | None, high_water: float, atr: float | None,
+                   after_atr_mult: float, buffer_pct: float = 0.0) -> float | None:
+    """Once a position has run >= after_atr_mult×ATR above entry, floor its stop at
+    entry (+small buffer) so a confirmed winner can never round-trip into a loss.
+    Returns None (no floor) until the trigger distance is reached or inputs are
+    unusable; callers only ever ratchet stops UP with this value."""
+    if (not avg_price or avg_price <= 0 or not atr or atr <= 0
+            or not after_atr_mult or after_atr_mult <= 0):
+        return None
+    if high_water < avg_price + after_atr_mult * atr:
+        return None
+    return round(avg_price * (1.0 + max(buffer_pct, 0.0)), 2)
+
+
 def risk_capped_weight(price: float, stop_price: float | None, equity_weight: float,
                        per_trade_risk_pct: float) -> float:
     """Cap target weight so loss at stop is <= per_trade_risk_pct of equity."""

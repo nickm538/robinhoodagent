@@ -16,7 +16,8 @@ log = get_logger("execution")
 def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
                  price_fn: Callable[[str], float | None], *,
                  allow_buys: bool = True,
-                 exclude_tickers: set[str] | None = None) -> list[Order]:
+                 exclude_tickers: set[str] | None = None,
+                 explain: list | None = None) -> list[Order]:
     equity = account.equity or 0.0
     if equity <= 0:
         return []
@@ -26,6 +27,12 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     max_turn = float(reb.get("max_turnover_per_rebalance", 0.30))
     min_notional = float(reb.get("min_order_notional", 20.0))
 
+    # `explain` (optional) collects one note per suppressed/shaped decision so a
+    # zero-order rebalance can tell the operator WHY it stayed quiet.
+    def note(ticker: str, action: str, detail: str = "") -> None:
+        if explain is not None:
+            explain.append({"ticker": ticker, "action": action, "detail": detail})
+
     exclude = exclude_tickers or set()
     cur = account.position_map()
     tmap = {t.ticker: t for t in targets}
@@ -34,6 +41,7 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     # --- exits & trims (sells) ---
     for tk, pos in cur.items():
         if tk in exclude:
+            note(tk, "excluded", "pending risk order or re-entry cooldown")
             continue
         px = price_fn(tk) or pos.current_price or pos.avg_price
         cur_w = (pos.quantity * px) / equity if px else 0.0
@@ -45,23 +53,36 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
             if sell_dollars >= min_notional and px:
                 orders.append(Order(tk, "sell", round(sell_dollars / px, 4),
                                     reason=f"trim {cur_w:.1%}->{tgt_w:.1%}"))
+            else:
+                note(tk, "skipped_min_notional",
+                     f"trim ${sell_dollars:.0f} < ${min_notional:.0f} min")
 
     # --- entries & adds (buys) ---
     buys: list[Order] = []
+    if not allow_buys and tmap:
+        note("*", "buys_halted", "daily drawdown halt or sell-only cycle")
     for tk, t in tmap.items():
         if tk in exclude:
+            if tk not in cur:
+                note(tk, "excluded", "pending risk order or re-entry cooldown")
             continue
         if not allow_buys:
             continue
         px = price_fn(tk)
         if not px:
+            note(tk, "skipped_no_price", "no live quote at order time")
             continue
         cur_w = (cur[tk].quantity * px) / equity if tk in cur else 0.0
         trade_band = entry_band if tk not in cur else band
         if (t.weight - cur_w) <= trade_band:
+            if tk in cur:
+                note(tk, "hold_within_band",
+                     f"drift {abs(t.weight - cur_w):.2%} <= band {trade_band:.2%}")
             continue
         buy_dollars = (t.weight - cur_w) * equity
         if buy_dollars < min_notional:
+            note(tk, "skipped_min_notional",
+                 f"buy ${buy_dollars:.0f} < ${min_notional:.0f} min")
             continue
         buys.append(Order(tk, "buy", round(buy_dollars / px, 4), notional=round(buy_dollars, 2),
                           reason=f"{'enter' if tk not in cur else 'add'} score={t.score}"))
@@ -75,8 +96,13 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
             px = price_fn(o.ticker) or 0
             o.quantity = round(o.notional / px, 4) if px else o.quantity
         log.info("turnover cap hit: scaled buys by %.2f", scale)
+        note("*", "turnover_capped", f"buys scaled by {scale:.2f}")
         # scaling can push small orders under the minimum — drop those (-> cash)
-        buys = [o for o in buys if (o.notional or 0) >= min_notional]
+        kept = [o for o in buys if (o.notional or 0) >= min_notional]
+        for o in buys:
+            if o not in kept:
+                note(o.ticker, "dropped_below_min_after_scale", "")
+        buys = kept
 
     # --- buying-power cap: never order more cash than the account actually has,
     # or the broker rejects it ("Not enough buying power"). Cushion for the
@@ -92,6 +118,7 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
                 px = price_fn(o.ticker) or 0
                 o.quantity = round(o.notional / px, 4) if px else o.quantity
             log.info("buying-power cap: $%.0f available -> scaled buys by %.2f", bp, scale)
+            note("*", "buying_power_capped", f"${bp:.0f} available, buys scaled by {scale:.2f}")
             buys = [o for o in buys if (o.notional or 0) >= min_notional]
 
     orders.extend(buys)

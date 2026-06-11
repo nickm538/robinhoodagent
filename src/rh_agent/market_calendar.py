@@ -1,7 +1,13 @@
-"""US equity session calendar (NYSE-style regular + early-close days)."""
+"""US equity session calendar (NYSE-style regular + early-close days).
+
+If the host lacks tzdata (``zoneinfo`` unavailable), a built-in US-Eastern
+DST rule keeps session times correct instead of silently drifting to UTC —
+a daemon on a mis-provisioned VM would otherwise hunt 4–5 hours off and look
+like it "only trades at the start of the day".
+"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     from zoneinfo import ZoneInfo
@@ -39,10 +45,39 @@ _EARLY_CLOSE: set[str] = {
 }
 
 
+def _nth_sunday_utc(year: int, month: int, nth: int) -> int:
+    """Day-of-month of the nth Sunday."""
+    d = datetime(year, month, 1, tzinfo=timezone.utc)
+    first_sunday = 1 + (6 - d.weekday()) % 7
+    return first_sunday + 7 * (nth - 1)
+
+
+def _eastern_offset_hours(now_utc: datetime) -> int:
+    """US-Eastern UTC offset by statute: EDT (-4) from 2:00 EST on the second
+    Sunday of March until 2:00 EDT on the first Sunday of November, else EST (-5)."""
+    y = now_utc.year
+    dst_start = datetime(y, 3, _nth_sunday_utc(y, 3, 2), 7, 0, tzinfo=timezone.utc)
+    dst_end = datetime(y, 11, _nth_sunday_utc(y, 11, 1), 6, 0, tzinfo=timezone.utc)
+    return -4 if dst_start <= now_utc < dst_end else -5
+
+
+def to_eastern(now_utc: datetime | None = None) -> datetime:
+    """Convert to US-Eastern, via zoneinfo when present, else the built-in rule."""
+    now = now_utc or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if _ET is not None:
+        return now.astimezone(_ET)
+    return now.astimezone(timezone(timedelta(hours=_eastern_offset_hours(now))))
+
+
+def tz_source() -> str:
+    return "zoneinfo" if _ET is not None else "built-in US-Eastern DST fallback"
+
+
 def is_market_open(now_utc: datetime | None = None) -> bool:
     """True during regular US equity session (09:30–16:00 ET, or 13:00 on early-close days)."""
-    now = now_utc or datetime.now(timezone.utc)
-    et = now.astimezone(_ET) if _ET else now
+    et = to_eastern(now_utc)
     if et.weekday() >= 5:
         return False
     day = et.strftime("%Y-%m-%d")
@@ -52,3 +87,23 @@ def is_market_open(now_utc: datetime | None = None) -> bool:
     open_m = 9 * 60 + 30
     close_m = 13 * 60 if day in _EARLY_CLOSE else 16 * 60
     return open_m <= minutes <= close_m
+
+
+def session_state(now_utc: datetime | None = None) -> dict:
+    """Session snapshot for diagnostics: phase + ET clock + tz source."""
+    et = to_eastern(now_utc)
+    day = et.strftime("%Y-%m-%d")
+    minutes = et.hour * 60 + et.minute
+    close_m = 13 * 60 if day in _EARLY_CLOSE else 16 * 60
+    if et.weekday() >= 5:
+        phase = "weekend"
+    elif day in _US_HOLIDAYS:
+        phase = "holiday"
+    elif minutes < 9 * 60 + 30:
+        phase = "pre-market"
+    elif minutes <= close_m:
+        phase = "regular session" + (" (early close)" if day in _EARLY_CLOSE else "")
+    else:
+        phase = "after-hours"
+    return {"phase": phase, "et": et.strftime("%Y-%m-%d %H:%M"), "tz_source": tz_source(),
+            "open": is_market_open(now_utc)}

@@ -267,6 +267,11 @@ portfolio:
   risk_controls:
     stop_loss_atr_mult: 2.5      # initial + trailing stop at N× ATR(14) from high-water mark
     take_profit_atr_mult: 6.0
+    breakeven_after_atr: 1.5     # once a name runs +1.5×ATR past entry, stop ratchets to entry
+    breakeven_buffer_pct: 0.002  # ...plus a hair (0.2%) so a flat round-trip still nets >= 0
+    reentry_cooldown_hours_after_stop: 6.0  # a stopped-out name cannot be re-bought for N hours
+                                 # (the radar re-surfaces volatile ex-runners instantly — this
+                                 # blocks the buy→stop→re-buy churn loop; 0 disables)
     hard_stop_pct: 0.18          # absolute -18% disaster stop floor
     max_daily_drawdown_halt: 0.06  # halt new buys if port down >6% in a day (sells still run)
     per_trade_risk_pct: 0.02     # DEPLOY: ~2% equity risk per name at stop. At 0.01, high-ATR names
@@ -293,6 +298,7 @@ ai_analyst:
   weight: 0.30                 # blend: composite = 0.70*quant + 0.30*AI (strong, not dominant, voice)
   max_candidates: 12           # send the top N quant names to Claude (middle-ground cost)
   max_tokens: 6000
+  timeout_seconds: 90          # client timeout; too tight silently drops the AI voice each cycle
 
 # ----------------------------------------------------------------------
 # DATA  — concurrency for live full-universe scans (snapshot runs serial).
@@ -315,7 +321,11 @@ daemon:
   trade_only_when_open: true
   manage_stops_every_tick: true
   pending_scan_max_seconds: 300  # never let a finished hunt rot behind retrying risk sells
+  pending_scan_expiry_seconds: 3600  # ...but NEVER trade a scan older than this (e.g. one that
+                                     # finished after the close and idled overnight — stale
+                                     # conviction must not fire blind at the next open)
   scan_timeout_seconds: 1800
+  activity_log: true             # flight recorder -> state/activity.jsonl; read via `rh-agent why`
 
 # ----------------------------------------------------------------------
 # JOURNAL / MEMORY  — self-improving log. Records every executed order with its

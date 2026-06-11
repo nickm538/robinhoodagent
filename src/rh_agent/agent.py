@@ -44,6 +44,9 @@ class RunResult:
     fills: list[dict] = field(default_factory=list)
     executed: bool = False
     mode: str = "paper"
+    # Why-no-trade transparency: per-name decisions build_orders suppressed/shaped
+    # (hold-within-band, min-notional skips, caps). Feeds the activity ledger.
+    order_notes: list = field(default_factory=list)
 
 
 class TradingAgent:
@@ -407,8 +410,10 @@ class TradingAgent:
             equity = account.equity if (account.equity and account.equity > 0) else self.default_equity()
         scan = self._apply_hold_discipline(scan, account, equity)
         self._refresh_execution_quotes(scan, account)
+        order_notes: list = []
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
-                              allow_buys=allow_buys, exclude_tickers=exclude_tickers)
+                              allow_buys=allow_buys, exclude_tickers=exclude_tickers,
+                              explain=order_notes)
 
         live = self.cfg.live_trading_armed and broker.supports_live
         # dry_run gates only the LIVE brokerage. The paper broker always
@@ -426,9 +431,12 @@ class TradingAgent:
         mode = "live" if live else "paper"
         if execute and not live:
             log.info("executed in PAPER mode (simulated fills on live prices)")
+        if not orders and order_notes:
+            log.info("no orders this cycle — decisions: %s",
+                     "; ".join(f"{n['ticker']}:{n['action']}" for n in order_notes[:10]))
         return RunResult(scan=scan, account=account, post_account=post_account,
                          orders=orders, fills=fills,
-                         executed=execute, mode=mode)
+                         executed=execute, mode=mode, order_notes=order_notes)
 
     def _refresh_execution_quotes(self, scan: ScanResult, account: Account) -> None:
         """Refresh quotes for held + target names immediately before order sizing."""
