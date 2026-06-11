@@ -124,12 +124,12 @@ set `EXECUTION_MODE=live` and `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` aft
 
 Emergency flatten: `python -m rh_agent.cli cancel-open` (live armed only).
 
-### Try it right now with the bundled live snapshot
+### Try it right now with an offline snapshot
 
-This repo ships a reproducible run on **real data captured 2026-06-02** (11
-liquid names + SPY/RSP, via FinancialDatasets.AI). See [`RESULTS.md`](RESULTS.md).
-To regenerate a snapshot from your own captured price files, use
-`scripts/assemble_snapshot.py`.
+No snapshot is committed to the repo. For offline demos, assemble one from
+captured provider responses with `scripts/assemble_snapshot.py`, then run
+`python -m rh_agent.cli scan --snapshot /path/to/snapshot.json`. See
+[`RESULTS.md`](RESULTS.md) for a historical example.
 
 ## Always-on, hands-off (the autonomous loop)
 
@@ -142,8 +142,8 @@ python -m rh_agent.cli loop --execute
 ```
 
 The loop runs **non-stop**: every cycle (default **1 min** poll, market-hours aware) it
-manages risk on open positions (ATR trailing/hard stops, take-profits), and every
-15 minutes by default it runs a dynamic intraday radar across the provider-listed
+manages risk on open positions (ATR trailing/hard stops, take-profits), and about every
+20 minutes by default it runs a dynamic intraday radar across the provider-listed
 equity universe, deep-scores the strongest candidates, rebuilds the book, and
 executes. A **daily-drawdown circuit breaker** suspends new buying after a -6%
 day (de-risking sells still run). It is crash-resistant — an error in one cycle is logged and the loop keeps

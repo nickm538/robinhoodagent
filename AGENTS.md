@@ -41,8 +41,10 @@ Or invoke tools directly via `.venv/bin/python` / `.venv/bin/rh-agent`.
 
 - Copy `.env.example` → `.env` and fill API keys for live data providers.
 - Strategy tuning lives in `config/config.yaml`.
-- Default `EXECUTION_MODE=live` with `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` in `.env.example`.
-- Set `EXECUTION_MODE=paper` and clear `LIVE_TRADING_CONFIRM` for safe simulated fills.
+- `.env.example` defaults to `EXECUTION_MODE=paper` with an empty `LIVE_TRADING_CONFIRM`
+  for safe simulated fills.
+- For the production VM only, set `EXECUTION_MODE=live` with
+  `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` after `rh-agent auth`.
 
 ### Running without API keys (offline / cloud demo)
 
@@ -56,7 +58,7 @@ Then run scan/run/backtest with `--snapshot /path/to/snapshot.json`.
 ### Live data / trading (optional)
 
 - **Live scans** need at least one market-data API key (`FINANCIALDATASETS_API_KEY`, `MBOUM_API_KEY`, etc.) in `.env`.
-- **Live trading** requires `pip install -e ".[live]"`, `python -m rh_agent.cli auth` (OAuth on port 8765), and `.env` with `EXECUTION_MODE=live` + `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` (defaults in `.env.example`).
+- **Live trading** requires `pip install -e ".[live]"`, `python -m rh_agent.cli auth` (OAuth on port 8765), and `.env` with `EXECUTION_MODE=live` + `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY`.
 
 ### Gotchas
 

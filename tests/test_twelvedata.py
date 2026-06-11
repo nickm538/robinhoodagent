@@ -143,3 +143,42 @@ def test_twelvedata_rate_limit_enters_cooldown_and_skips_repeat_calls():
     with pytest.raises(ProviderUnsupported, match="cooling down"):
         p.get_prices("MSFT")
     assert p.http.calls == 1
+
+
+def test_get_quotes_batch_adapts_and_tolerates_chunk_failure():
+    p = TwelveDataProvider.__new__(TwelveDataProvider)
+    p._batch_size = 4
+    p._rate_limited_until = 0.0
+    sizes_seen: list[int] = []
+
+    def fake_q(section, ttl, path, params):
+        syms = params["symbol"].split(",")
+        sizes_seen.append(len(syms))
+        if len(syms) > 2:
+            raise ProviderUnsupported("batch too large")
+        return {s: {"symbol": s, "close": "100.0", "volume": "1000"} for s in syms}
+
+    p._q = fake_q
+    out = p.get_quotes_batch(["AAA", "BBB", "CCC", "DDD", "EEE"])
+
+    assert set(out) == {"AAA", "BBB", "CCC", "DDD", "EEE"}
+    assert all(q.price == 100.0 for q in out.values())
+    assert p._batch_size <= 2
+    assert max(sizes_seen) == 4 and min(sizes_seen) <= 2
+
+
+def test_market_data_falls_through_scoreless_sentiment_payload():
+    class _EmptySentiment:
+        def get_news_sentiment(self, ticker):
+            return {"article_count": 3, "source": "empty"}
+
+    class _ScoredSentiment:
+        def get_news_sentiment(self, ticker):
+            return {"score": 0.4, "article_count": 2, "source": "scored"}
+
+    md = MarketData.__new__(MarketData)
+    md.providers = {"empty": _EmptySentiment(), "scored": _ScoredSentiment()}
+    md.priority = {"news_sentiment": ["empty", "scored"]}
+
+    out = md._try("news_sentiment", "get_news_sentiment", "AAA")
+    assert out["score"] == 0.4

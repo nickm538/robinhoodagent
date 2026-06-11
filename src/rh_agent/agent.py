@@ -418,6 +418,7 @@ class TradingAgent:
         if execute:
             if live and not self.cfg.live_trading_armed:
                 log.error("live trading disarmed — refusing order placement")
+            else:
                 fills, post_account = execute_orders(
                     broker, orders, self.cfg, account=account,
                     get_account=broker.get_account,
