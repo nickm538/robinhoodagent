@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from argparse import Namespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -287,3 +288,16 @@ def test_daemon_preserves_pending_scan_when_live_refresh_fails(tmp_path, monkeyp
     d.tick(execute=True)
 
     assert d._pending_scan is scan
+
+
+def test_loop_refusal_explains_unarmed_live_env(monkeypatch, capsys):
+    from rh_agent.cli import cmd_loop
+
+    monkeypatch.setenv("EXECUTION_MODE", "live")
+    monkeypatch.delenv("LIVE_TRADING_CONFIRM", raising=False)
+    code = cmd_loop(Namespace(config=None, execute=True, snapshot=None, once=False, max_cycles=None))
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "EXECUTION_MODE=live but live trading is not armed" in out
+    assert "LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY" in out

@@ -18,6 +18,10 @@ while true; do
   "$PYTHON" -m rh_agent.cli loop "$@" 2>&1 | tee -a logs/loop.log
   code=${PIPESTATUS[0]}
   set -e
+  if [ "$code" -eq 2 ]; then
+    echo "loop refused to start (code 2). Fix .env/auth/duplicate daemon; not auto-restarting." | tee -a logs/loop.log
+    exit "$code"
+  fi
   echo "loop exited with code ${code} ($(date)) — restarting in 30s" | tee -a logs/loop.log
   sleep 30
 done

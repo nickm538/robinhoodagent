@@ -16,6 +16,7 @@ from .config import load_config
 from .logging_setup import get_logger, setup_logging
 
 log = get_logger("cli")
+EXIT_REFUSED = 2
 
 
 def _agent(args):
@@ -199,17 +200,24 @@ def cmd_loop(args) -> int:
     from .process_lock import ProcessLockError
     cfg = load_config(args.config)
     if args.execute and cfg.execution_mode == "live" and not cfg.live_trading_armed:
-        print("Refusing live loop: set LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY to arm.")
-        return 2
+        print("Refusing live loop: EXECUTION_MODE=live but live trading is not armed.")
+        print("Fix .env for the production VM:")
+        print("  EXECUTION_MODE=live")
+        print("  LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY")
+        print("Or set EXECUTION_MODE=paper for simulated fills.")
+        return EXIT_REFUSED
     try:
         AlwaysOnAgent(cfg, snapshot_path=args.snapshot).run_forever(
             execute=args.execute, once=args.once, max_cycles=args.max_cycles)
     except LiveBrokerUnavailable as e:
-        print(f"Refusing: {e}")
-        return 2
+        print(f"Refusing live loop: {e}")
+        print("Run `python -m rh_agent.cli doctor` and `python -m rh_agent.cli auth` on the VM, "
+              "then restart rh-agent.service.")
+        return EXIT_REFUSED
     except ProcessLockError as e:
-        print(f"Refusing: {e}")
-        return 2
+        print(f"Refusing loop start: {e}")
+        print("Check the existing process with `systemctl status rh-agent` or stop the duplicate.")
+        return EXIT_REFUSED
     return 0
 
 

@@ -124,6 +124,11 @@ set `EXECUTION_MODE=live` and `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY` aft
 
 Emergency flatten: `python -m rh_agent.cli cancel-open` (live armed only).
 
+If `systemctl status rh-agent` shows `status=2`, the CLI refused to start on
+purpose. Check the exact message with `journalctl -u rh-agent -n 80 --no-pager`;
+the usual causes are missing `LIVE_TRADING_CONFIRM`, expired/missing OAuth
+(`python -m rh_agent.cli auth`), or a duplicate daemon lock.
+
 ### Try it right now with an offline snapshot
 
 No snapshot is committed to the repo. For offline demos, assemble one from
