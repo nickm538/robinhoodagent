@@ -233,6 +233,55 @@ def test_exclude_tickers_still_blocks_both_sides():
     assert orders == []                      # unresolved protective order: hands off
 
 
+# ----------------------------- FD rate-limit breaker ------------------------
+
+def test_fd_429_trips_short_cooldown_and_stops_calling():
+    from rh_agent.providers.base import ProviderUnsupported, RateLimitError
+    from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
+
+    p = FinancialDatasetsProvider.__new__(FinancialDatasetsProvider)
+    p._rate_limited_until = 0.0
+
+    class _Cache:
+        def get(self, ns, key, ttl):
+            return None
+
+        def set(self, ns, key, data, source=""):
+            raise AssertionError("rate-limited response must not be cached")
+
+    calls = {"n": 0}
+
+    class _Http:
+        def get_json(self, path, params):
+            calls["n"] += 1
+            raise RateLimitError("429", retry_after_seconds=2.0)
+
+    p.cache = _Cache()
+    p.http = _Http()
+    with pytest.raises(ProviderUnsupported):
+        p._cached("snap", "AAPL", 3, "/snapshot/", {"ticker": "AAPL"})
+    assert calls["n"] == 1
+    assert p._rate_limit_active()
+    with pytest.raises(ProviderUnsupported):   # no second HTTP call during cooldown
+        p._cached("snap", "MSFT", 3, "/snapshot/", {"ticker": "MSFT"})
+    assert calls["n"] == 1
+
+
+def test_fd_cache_hits_served_even_during_cooldown():
+    from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
+
+    p = FinancialDatasetsProvider.__new__(FinancialDatasetsProvider)
+    p._rate_limited_until = 9e18          # cooling down "forever"
+
+    class _Cache:
+        def get(self, ns, key, ttl):
+            return {"snapshot": {"price": 101.0}}
+
+    p.cache = _Cache()
+    out = p._cached("snap", "AAPL", 3, "/snapshot/", {"ticker": "AAPL"})
+    assert out["snapshot"]["price"] == 101.0
+
+
 # ----------------------------- cooldown-aware scan ---------------------------
 
 def test_safe_scan_passes_exclusions_to_fresh_agent(monkeypatch):

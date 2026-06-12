@@ -6,14 +6,26 @@ FinancialDatasets MCP server returns).
 """
 from __future__ import annotations
 
+import os
+import time
 from typing import Any
 
 import pandas as pd
 
+from ..logging_setup import get_logger
 from ..models import Quote
-from .base import DataProvider, DiskCache, HttpClient, ProviderUnsupported, prices_to_df
+from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
+                   RateLimitError, prices_to_df)
+
+log = get_logger("financialdatasets")
 
 BASE = "https://api.financialdatasets.ai"
+
+# FD limits are per-minute (unlike Mboum's monthly cap) — when the primary
+# provider 429s under load, briefly stop hammering it and let the fallback
+# chain serve; a short re-probe restores it as soon as the window clears.
+RATE_LIMIT_COOLDOWN_SECONDS = float(
+    os.getenv("FINANCIALDATASETS_RATE_LIMIT_COOLDOWN_SECONDS", "60"))
 
 # FinancialDatasets metric name -> our canonical fundamentals key.
 _FUND_MAP = {
@@ -64,6 +76,19 @@ class FinancialDatasetsProvider(DataProvider):
         super().__init__(cache)
         self.http = HttpClient(BASE, max_per_sec=8, default_headers={"X-API-KEY": api_key})
         self._cache_ttls = cache_ttls or {}
+        self._rate_limited_until = 0.0
+
+    def _rate_limit_active(self) -> bool:
+        return time.time() < getattr(self, "_rate_limited_until", 0.0)
+
+    def _enter_cooldown(self, seconds: float | None, reason: str) -> None:
+        cooldown = float(seconds) if seconds and seconds > 0 else RATE_LIMIT_COOLDOWN_SECONDS
+        until = time.time() + cooldown
+        if until > getattr(self, "_rate_limited_until", 0.0):
+            self._rate_limited_until = until
+        log.warning("financialdatasets rate limited (%s) — cooling down %.0fs; "
+                    "fallback providers serve meanwhile", reason,
+                    max(self._rate_limited_until - time.time(), 0.0))
 
     def _ttl(self, section: str, default: float) -> float:
         key = self._TTL_KEY.get(section, section)
@@ -80,7 +105,13 @@ class FinancialDatasetsProvider(DataProvider):
         hit = self.cache.get(f"fd/{section}", key, ttl)
         if hit is not None:
             return hit
-        data = self.http.get_json(path, params)
+        if self._rate_limit_active():
+            raise ProviderUnsupported("financialdatasets cooling down after rate limit")
+        try:
+            data = self.http.get_json(path, params)
+        except RateLimitError as e:
+            self._enter_cooldown(e.retry_after_seconds, path)
+            raise ProviderUnsupported("financialdatasets rate limited") from e
         self.cache.set(f"fd/{section}", key, data, source=self.name)
         return data
 
