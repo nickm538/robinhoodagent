@@ -31,7 +31,8 @@ def cmd_doctor(args) -> int:
     cfg = load_config(args.config)
     print("== rh-agent doctor ==")
     print("\nAPI keys present:")
-    for p in ["financialdatasets", "mboum", "alphavantage", "twelvedata", "firecrawl", "exa"]:
+    for p in ["financialdatasets", "massive", "mboum", "alphavantage", "twelvedata",
+              "firecrawl", "exa"]:
         print(f"  {p:18} {'✓' if cfg.api_key(p) else '— (missing)'}")
     rh_tok = cfg.robinhood_token()
     src = "env token" if rh_tok else None
@@ -46,6 +47,8 @@ def cmd_doctor(args) -> int:
     print(f"\nExecution mode: {cfg.execution_mode}  |  live armed: {cfg.live_trading_armed}")
     print("\nDirect egress (needs your environment's network policy to allow these hosts):")
     hosts = {"financialdatasets": ("https://api.financialdatasets.ai", None),
+             "massive": ("https://api.massive.com/v1/marketstatus/now",
+                         {"apiKey": cfg.api_key("massive") or "demo"}),
              "mboum": ("https://api.mboum.com", None),
              "alphavantage": ("https://www.alphavantage.co", None),
              "twelvedata": ("https://api.twelvedata.com/quote",

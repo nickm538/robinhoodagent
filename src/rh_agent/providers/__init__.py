@@ -31,6 +31,14 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
         from .mboum import MboumProvider
         providers["mboum"] = MboumProvider(mb_key, cache)
 
+    mv_key = cfg.api_key("massive")
+    if mv_key:
+        from .massive import MassiveProvider
+        providers["massive"] = MassiveProvider(
+            mv_key, cache,
+            max_per_sec=float(cfg.get("providers.massive_max_per_sec", 0) or 0) or None,
+        )
+
     av_key = cfg.api_key("alphavantage")
     if av_key:
         from .alpha_vantage import AlphaVantageProvider
