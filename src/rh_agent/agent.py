@@ -66,7 +66,9 @@ class TradingAgent:
 
     # ---- helpers ----
     def default_equity(self) -> float:
-        return float(os.getenv("PAPER_EQUITY", self.cfg.get("backtest.initial_equity", 100_000)))
+        from .providers.base import env_float
+        return env_float("PAPER_EQUITY",
+                         float(self.cfg.get("backtest.initial_equity", 100_000)), minimum=0.0)
 
     def price_fn(self, ticker: str, *, for_risk: bool = False) -> float | None:
         if not for_risk and ticker in self._quote_cache:

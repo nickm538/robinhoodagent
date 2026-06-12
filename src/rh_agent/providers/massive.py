@@ -30,15 +30,17 @@ import pandas as pd
 from ..logging_setup import get_logger
 from ..models import Quote
 from .base import (DataProvider, DiskCache, HttpClient, ProviderError,
-                   ProviderUnsupported, RateLimitError, prices_to_df)
+                   ProviderUnsupported, RateLimitError, env_float, prices_to_df)
 
 log = get_logger("massive")
 
 BASE = os.getenv("MASSIVE_BASE_URL", "https://api.massive.com")
 
 # Paid plans are uncapped on request count; this only paces burst politeness.
-DEFAULT_MAX_PER_SEC = float(os.getenv("MASSIVE_MAX_PER_SEC", "20"))
-RATE_LIMIT_COOLDOWN_SECONDS = float(os.getenv("MASSIVE_RATE_LIMIT_COOLDOWN_SECONDS", "60"))
+# env_float: a malformed .env line must never abort daemon startup at import.
+DEFAULT_MAX_PER_SEC = env_float("MASSIVE_MAX_PER_SEC", 20.0, minimum=0.1)
+RATE_LIMIT_COOLDOWN_SECONDS = env_float("MASSIVE_RATE_LIMIT_COOLDOWN_SECONDS", 60.0,
+                                        minimum=1.0)
 
 _SNAPSHOT_CHUNK = 100          # tickers per filtered-snapshot batch request
 _UNIVERSE_MAX_PAGES = 6        # 1000/page — plenty above universe.scan_cap

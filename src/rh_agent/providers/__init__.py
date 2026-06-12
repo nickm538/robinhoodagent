@@ -8,6 +8,14 @@ from .base import DataProvider, DiskCache
 log = get_logger("providers")
 
 
+def _cfg_float(val, default: float) -> float:
+    """config.yaml numbers defensively coerced — a typo there must not stop the daemon."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, DataProvider]:
     """Construct the available providers. If ``snapshot_path`` is given, the
     SnapshotProvider is returned alone (used for offline/reproducible runs)."""
@@ -36,7 +44,7 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
         from .massive import MassiveProvider
         providers["massive"] = MassiveProvider(
             mv_key, cache,
-            max_per_sec=float(cfg.get("providers.massive_max_per_sec", 0) or 0) or None,
+            max_per_sec=_cfg_float(cfg.get("providers.massive_max_per_sec", 0), 0) or None,
         )
 
     av_key = cfg.api_key("alphavantage")
@@ -50,7 +58,7 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
         providers["twelvedata"] = TwelveDataProvider(
             td_key,
             cache,
-            max_per_sec=float(cfg.get("providers.twelvedata_max_per_sec", 8)),
+            max_per_sec=_cfg_float(cfg.get("providers.twelvedata_max_per_sec", 8), 8),
             enable_market_movers=bool(cfg.get("providers.twelvedata_enable_market_movers", False)),
         )
 

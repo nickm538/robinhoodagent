@@ -9,7 +9,6 @@ so every parser unwraps defensively and tolerates missing fields.
 """
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -18,7 +17,7 @@ import pandas as pd
 from ..logging_setup import get_logger
 from ..models import Quote
 from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
-                   RateLimitError, prices_to_df)
+                   RateLimitError, env_float, prices_to_df)
 
 log = get_logger("mboum")
 
@@ -27,7 +26,8 @@ BASE = "https://api.mboum.com"
 # Mboum's plan cap is MONTHLY (e.g. 50k calls) — once exhausted, every further
 # request is a doomed HTTP round trip that slows the whole scan. Cool down hard
 # and re-probe hourly; MarketData falls through to the other providers meanwhile.
-RATE_LIMIT_COOLDOWN_SECONDS = float(os.getenv("MBOUM_RATE_LIMIT_COOLDOWN_SECONDS", "3600"))
+RATE_LIMIT_COOLDOWN_SECONDS = env_float("MBOUM_RATE_LIMIT_COOLDOWN_SECONDS", 3600.0,
+                                        minimum=1.0)
 
 _QUOTA_WORDS = ("quota", "rate limit", "limit reached", "limit exceeded",
                 "too many requests", "upgrade your plan", "monthly limit")
