@@ -267,6 +267,18 @@ def test_fd_429_trips_short_cooldown_and_stops_calling():
     assert calls["n"] == 1
 
 
+def test_fd_request_pace_env_knob(monkeypatch):
+    from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
+
+    monkeypatch.setenv("FINANCIALDATASETS_MAX_PER_SEC", "4")
+    p = FinancialDatasetsProvider("test-key")
+    assert p.http.limiter.min_interval == pytest.approx(0.25)   # 4 req/sec
+
+    monkeypatch.delenv("FINANCIALDATASETS_MAX_PER_SEC")
+    p2 = FinancialDatasetsProvider("test-key")
+    assert p2.http.limiter.min_interval == pytest.approx(0.125)  # default 8/sec
+
+
 def test_fd_cache_hits_served_even_during_cooldown():
     from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
 

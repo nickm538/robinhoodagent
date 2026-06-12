@@ -74,7 +74,11 @@ class FinancialDatasetsProvider(DataProvider):
     def __init__(self, api_key: str, cache: DiskCache | None = None, *,
                  cache_ttls: dict | None = None):
         super().__init__(cache)
-        self.http = HttpClient(BASE, max_per_sec=8, default_headers={"X-API-KEY": api_key})
+        # Pace requests UNDER the plan's per-minute ceiling and the 429/Retry-After
+        # waves disappear entirely (credits are volume; the 429s are velocity).
+        # e.g. a 240/min plan -> FINANCIALDATASETS_MAX_PER_SEC=4.
+        rate = float(os.getenv("FINANCIALDATASETS_MAX_PER_SEC", "8"))
+        self.http = HttpClient(BASE, max_per_sec=rate, default_headers={"X-API-KEY": api_key})
         self._cache_ttls = cache_ttls or {}
         self._rate_limited_until = 0.0
 
