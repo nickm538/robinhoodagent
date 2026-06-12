@@ -343,6 +343,10 @@ daemon:
                                      # finished after the close and idled overnight — stale
                                      # conviction must not fire blind at the next open)
   scan_timeout_seconds: 1800
+  scan_blackout_minutes_before_close: 15  # no NEW hunts this close to the bell — a hunt
+                                          # that straddles the close would idle overnight
+                                          # and beg to fire stale at the next open
+                                          # (stops/TPs still run every tick; 0 disables)
   activity_log: true             # flight recorder -> state/activity.jsonl; read via `rh-agent why`
 
 # ----------------------------------------------------------------------
