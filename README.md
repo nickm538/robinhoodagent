@@ -165,6 +165,40 @@ arm and deploy. **Deploy it to stay up 24/7** (this is what makes it truly
 * **Docker** — `docker build -t rh-agent . && docker run -d --env-file .env rh-agent`
 * **Any VPS / cloud VM** — `nohup ./scripts/run_loop.sh --execute &`
 
+## "Is it working?" — reading the agent's activity
+
+A quiet tape is often **discipline, not a stall**: once the book matches the
+target weights, every 20-minute hunt that re-confirms the same names produces
+**zero orders by design** (no-trade band + exit hysteresis). Stops/take-profits
+then tend to fire on open/close volatility — which can *look* like "it only
+trades at the start or end of the day". The agent now keeps a flight recorder
+so you never have to guess:
+
+```bash
+# Human diagnosis of the last 24h: hunts started/completed/abandoned, scan
+# durations vs the configured cadence, why rebalances produced no orders,
+# protective exits, cooldowns, halts.
+python -m rh_agent.cli why            # add --hours 72 for a longer window
+```
+
+Under the hood every scan, rebalance, stop/TP fire, halt and heartbeat is
+appended to `state/activity.jsonl` (`daemon.activity_log`). What to look for:
+
+* **`scan-bound` cadence** — scans taking longer than `intraday_hours` means
+  hunts run back-to-back as fast as data allows; lower `universe.scan_cap` /
+  `deep_top_k` or accept the pace.
+* **`abandoned` scans** — the watchdog killed a hung scan (provider rate limits
+  are the usual cause; run `rh-agent doctor`). Those cycles never rebalance.
+* **Zero-order rebalances with `hold_within_band` notes** — healthy: it hunted,
+  and the held book still ranked best.
+
+The hunt cadence itself is protected by three guards added for exactly the
+sparse-trading failure modes: the universe light-pass is now threaded (hunts
+finish minutes faster), a pending scan that idles past
+`daemon.pending_scan_expiry_seconds` (e.g. finished after the close) is
+**discarded instead of fired blind at the next open**, and market hours stay
+correct even on hosts without tzdata (built-in US-Eastern DST fallback).
+
 ## Connectivity / egress allowlist
 
 The agent needs outbound HTTPS to its data + trading hosts. On a locked-down
@@ -187,8 +221,21 @@ On your own server/VPS there is no such restriction.
 * **Defense in depth:** paper `.env.example` default · explicit live opt-in ·
   pre-execution quote refresh · order acceptance checks · `cancel-open` · Robinhood's
   separate Agentic account · per-name (10%) and per-sector (35%) caps · ATR
-  trailing stops · hard -18% stop · daily drawdown halt · liquidity floor
-  (no penny stocks / illiquid names).
+  trailing stops (monotonic — a rebalance can never lower a ratcheted stop) ·
+  hard -18% stop · **breakeven ratchet** (a name up ≥1.5×ATR ratchets the stop
+  toward breakeven near the entry price, reducing the chance of round-trip loss
+  on ideal fills but may still incur losses due to live fills, spread, slippage,
+  or partial fills) · **stop re-entry cooldown** (a stopped-out name can't
+  be re-BOUGHT for 6h — exits are never blocked — and it doesn't waste a book
+  slot meanwhile) · **intraday tape shock** (SPY -1.5%/-2.5% on the day downgrades
+  the regime to neutral/risk_off immediately, instead of waiting for the daily
+  bar) · stale-scan expiry (never trade yesterday's conviction at the open) ·
+  daily drawdown halt · liquidity floor (no penny stocks / illiquid names).
+* **Provider quota resilience:** when a data provider exhausts its plan (e.g.
+  Mboum's monthly call cap), it trips a cooldown (re-probes hourly,
+  `MBOUM_RATE_LIMIT_COOLDOWN_SECONDS` to tune) instead of burning a doomed HTTP
+  round trip per name per scan; the priority chain serves from the remaining
+  providers and the cooled provider resumes automatically when its quota resets.
 * **Not investment advice.** You are responsible for your account.
 
 ## Configuration

@@ -33,6 +33,7 @@ Or invoke tools directly via `.venv/bin/python` / `.venv/bin/rh-agent`.
 | Compile | `PYTHONPATH=src python -m compileall -q src` |
 | Tests | `PYTHONPATH=src python -m pytest -q` |
 | Env check | `python -m rh_agent.cli doctor` |
+| Explain activity | `python -m rh_agent.cli why [--hours 24]` |
 | Paper scan | `python -m rh_agent.cli scan --snapshot <file>` |
 | Paper trade | `python -m rh_agent.cli run --execute --snapshot <file>` |
 | Account | `python -m rh_agent.cli status` |

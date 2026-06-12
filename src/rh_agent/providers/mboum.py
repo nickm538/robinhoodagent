@@ -9,14 +9,28 @@ so every parser unwraps defensively and tolerates missing fields.
 """
 from __future__ import annotations
 
+import os
+import time
 from typing import Any
 
 import pandas as pd
 
+from ..logging_setup import get_logger
 from ..models import Quote
-from .base import DataProvider, DiskCache, HttpClient, ProviderUnsupported, prices_to_df
+from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
+                   RateLimitError, prices_to_df)
+
+log = get_logger("mboum")
 
 BASE = "https://api.mboum.com"
+
+# Mboum's plan cap is MONTHLY (e.g. 50k calls) — once exhausted, every further
+# request is a doomed HTTP round trip that slows the whole scan. Cool down hard
+# and re-probe hourly; MarketData falls through to the other providers meanwhile.
+RATE_LIMIT_COOLDOWN_SECONDS = float(os.getenv("MBOUM_RATE_LIMIT_COOLDOWN_SECONDS", "3600"))
+
+_QUOTA_WORDS = ("quota", "rate limit", "limit reached", "limit exceeded",
+                "too many requests", "upgrade your plan", "monthly limit")
 
 
 def _unwrap(d: Any) -> Any:
@@ -34,6 +48,19 @@ def _first(d: dict, *keys, default=None):
     return default
 
 
+def _is_quota_payload(data: Any) -> bool:
+    """True for an over-quota/limit error body returned with HTTP 200.
+    Such payloads carry a message and NO data section — never treat a real
+    payload (which always has body/data/result/...) as a quota error."""
+    if not isinstance(data, dict):
+        return False
+    if any(k in data and data[k] is not None
+           for k in ("body", "data", "result", "results", "quotes")):
+        return False
+    msg = " ".join(str(data.get(k, "")) for k in ("message", "error", "detail")).lower()
+    return any(w in msg for w in _QUOTA_WORDS)
+
+
 class MboumProvider(DataProvider):
     name = "mboum"
 
@@ -42,13 +69,36 @@ class MboumProvider(DataProvider):
         self.http = HttpClient(BASE, max_per_sec=12,
                                default_headers={"Authorization": f"Bearer {api_key}",
                                                 "Accept": "application/json"})
+        self._rate_limited_until = 0.0
+
+    def _rate_limit_active(self) -> bool:
+        return time.time() < self._rate_limited_until
+
+    def _enter_cooldown(self, seconds: float | None, reason: str) -> None:
+        cooldown = float(seconds) if seconds and seconds > 0 else RATE_LIMIT_COOLDOWN_SECONDS
+        until = time.time() + cooldown
+        if until > self._rate_limited_until:
+            self._rate_limited_until = until
+        log.warning("mboum quota/rate limit hit (%s) — cooling down %.0fs; "
+                    "other providers serve meanwhile", reason,
+                    max(self._rate_limited_until - time.time(), 0.0))
 
     def _cached(self, section: str, ttl: float, path: str, params: dict) -> Any:
         key = f"{path}|{sorted(params.items())}"
         hit = self.cache.get(f"mboum/{section}", key, ttl)
-        if hit is not None:
+        # A quota-error body cached before this guard existed must not be served as data.
+        if hit is not None and not _is_quota_payload(hit):
             return hit
-        data = self.http.get_json(path, params)
+        if self._rate_limit_active():
+            raise ProviderUnsupported("mboum cooling down after quota/rate limit")
+        try:
+            data = self.http.get_json(path, params)
+        except RateLimitError as e:
+            self._enter_cooldown(e.retry_after_seconds, path)
+            raise ProviderUnsupported("mboum rate limited") from e
+        if _is_quota_payload(data):
+            self._enter_cooldown(None, path)        # 200-with-error body: do NOT cache it
+            raise ProviderUnsupported("mboum quota exceeded")
         self.cache.set(f"mboum/{section}", key, data, source=self.name)
         return data
 

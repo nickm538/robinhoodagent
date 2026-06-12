@@ -423,7 +423,7 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
             return _Brk()
         def default_equity(self):
             return 1000.0
-        def scan(self, equity, include_tickers=None):
+        def scan(self, equity, include_tickers=None, exclude_tickers=None):
             events.append("scan")
             return scan_result
         def reconcile_and_execute(self, scan, **kw):
@@ -435,7 +435,7 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
     class _ScanAgent:
         def __init__(self, cfg, snapshot_path=None):
             pass
-        def scan(self, equity, include_tickers=None):
+        def scan(self, equity, include_tickers=None, exclude_tickers=None):
             events.append("scan")
             return scan_result
 

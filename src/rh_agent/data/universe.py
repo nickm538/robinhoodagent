@@ -171,15 +171,30 @@ def build_universe(md: MarketData, cfg: Config, raw: list[str] | None = None) ->
         if intraday_cfg.get("enabled", False)
         else None
     )
-    passed: list[Candidate] = []
-    for t in tickers:
+
+    # The light pass is pure I/O (quote + cached prices + company) and was the
+    # single biggest scan-latency cost when run serially over hundreds of names.
+    # Fan out across threads — each provider rate-limits itself — preserving
+    # input order so movers stay seeded ahead of the base set.
+    def _fetch(t: str) -> Candidate | None:
         if t in blacklist:
-            continue
+            return None
         try:
-            c = _light(md, t, max_quote_age_seconds=quote_age)
+            return _light(md, t, max_quote_age_seconds=quote_age)
         except Exception as e:
             log.debug("light fetch %s failed: %s", t, e)
-            c = None
+            return None
+
+    workers = int(cfg.get("data.max_workers", 8) or 1)
+    if workers > 1 and len(tickers) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(workers, 16)) as ex:
+            candidates = list(ex.map(_fetch, tickers))
+    else:
+        candidates = [_fetch(t) for t in tickers]
+
+    passed: list[Candidate] = []
+    for c in candidates:
         if not c:
             continue
         if c.sector in excl_sectors:

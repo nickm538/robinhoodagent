@@ -2,6 +2,7 @@
 
     rh-agent doctor                 # environment & connectivity check
     rh-agent status                 # active providers + paper account
+    rh-agent why    [--hours 24]    # explain recent activity (quiet =/= broken)
     rh-agent scan   [--snapshot f]  # rank universe, print target book
     rh-agent run    [--execute]     # scan + reconcile + (paper/live) orders
     rh-agent backtest [--snapshot f]# walk-forward vs benchmark
@@ -193,6 +194,15 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def cmd_why(args) -> int:
+    """Explain what the agent has been doing and whether quiet periods are normal.
+    Pure file reads (activity ledger + daemon state) — safe to run beside the daemon."""
+    from .activity import diagnose
+    cfg = load_config(args.config)
+    print(diagnose(cfg, hours=args.hours))
+    return 0
+
+
 def cmd_loop(args) -> int:
     """Run the always-on autonomous agent."""
     from .broker.errors import LiveBrokerUnavailable
@@ -265,6 +275,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--start")
     s.add_argument("--end")
     s.set_defaults(func=cmd_backtest)
+
+    s = sub.add_parser("why", help="explain recent activity — is a quiet day normal or a fault?")
+    s.add_argument("--hours", type=float, default=24.0, help="lookback window (default 24h)")
+    s.set_defaults(func=cmd_why)
 
     s = sub.add_parser("loop", help="run the always-on autonomous agent")
     s.add_argument("--snapshot")

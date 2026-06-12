@@ -30,6 +30,8 @@ class RegimeResult:
             bits.append(f"VIX {s['vix']:.1f}")
         if s.get("breadth") is not None:
             bits.append(f"breadth {s['breadth']:+.1%}")
+        if s.get("spy_day_change_pct") is not None:
+            bits.append(f"SPY today {s['spy_day_change_pct']:+.1f}%")
         if s.get("yield_curve_10_2") is not None:
             bits.append(f"10y-2y {s['yield_curve_10_2']:+.2f}")
         return f"{self.name} ({', '.join(bits)}) -> exposure {self.exposure:.0%}"
@@ -67,6 +69,36 @@ def _breadth(md) -> float | None:
         return None
 
 
+def _intraday_tape_adjust(md, cfg: Config, name: str) -> tuple[str, float | None]:
+    """Between daily bars, a violent SPY day move should de-risk NOW, not at the
+    next close. Downgrades the regime on the live tape; never upgrades it.
+    Graceful no-op when disabled or no live SPY quote is available."""
+    icfg = cfg.get("regime.intraday", {}) or {}
+    if not icfg.get("enabled", False):
+        return name, None
+    get_quote = getattr(md, "get_quote", None)
+    if get_quote is None:
+        return name, None
+    try:
+        q = get_quote("SPY")
+        dc = float(q.day_change_pct) if q and q.day_change_pct is not None else None
+    except Exception:
+        return name, None
+    if dc is None:
+        return name, None
+    risk_off_at = float(icfg.get("spy_drop_risk_off_pct", -2.5))
+    neutral_at = float(icfg.get("spy_drop_neutral_pct", -1.5))
+    if name != "high_volatility":      # already the most defensive weighting
+        if dc <= risk_off_at and name in ("risk_on_trend", "neutral"):
+            log.warning("intraday tape shock: SPY %+.2f%% today — downgrading %s -> risk_off",
+                        dc, name)
+            name = "risk_off"
+        elif dc <= neutral_at and name == "risk_on_trend":
+            log.info("intraday tape weakness: SPY %+.2f%% today — risk_on_trend -> neutral", dc)
+            name = "neutral"
+    return name, dc
+
+
 def detect_regime(md, cfg: Config) -> RegimeResult:
     rc = cfg.get("regime", {})
     sig = rc.get("signals", {})
@@ -92,6 +124,10 @@ def detect_regime(md, cfg: Config) -> RegimeResult:
         name = "risk_on_trend"
     else:
         name = "neutral"
+
+    name, spy_dc = _intraday_tape_adjust(md, cfg, name)
+    if spy_dc is not None:
+        signals["spy_day_change_pct"] = spy_dc
 
     res = RegimeResult(name=name,
                        weights=weights.get(name, weights.get("neutral", {})),

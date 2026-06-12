@@ -96,6 +96,9 @@ class AIAnalyst:
         self.weight = max(0.0, min(1.0, float(a.get("weight", 0.25))))  # blend weight, clamped [0,1]
         self.max_candidates = int(a.get("max_candidates", 15))
         self.max_tokens = int(a.get("max_tokens", 6000))
+        # A too-tight timeout silently drops the AI voice every cycle (graceful
+        # no-op) — make it tunable so deep-effort calls actually land.
+        self.timeout = float(a.get("timeout_seconds", 60.0))
         self.api_key = Config.api_key("anthropic")
         cfg_enabled = a.get("enabled", True)
         self.enabled = bool(cfg_enabled and self.api_key)
@@ -112,7 +115,8 @@ class AIAnalyst:
         # (SDK default is a 600s timeout with 2 retries).
         try:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=self.api_key, timeout=60.0, max_retries=1)
+            self._client = anthropic.Anthropic(api_key=self.api_key, timeout=self.timeout,
+                                               max_retries=1)
         except Exception as e:
             log.warning("AI analyst: client unavailable (%s) — running pure-quant", e)
             self.enabled = False
