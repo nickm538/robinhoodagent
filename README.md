@@ -222,8 +222,10 @@ On your own server/VPS there is no such restriction.
   pre-execution quote refresh · order acceptance checks · `cancel-open` · Robinhood's
   separate Agentic account · per-name (10%) and per-sector (35%) caps · ATR
   trailing stops (monotonic — a rebalance can never lower a ratcheted stop) ·
-  hard -18% stop · **breakeven ratchet** (a name up ≥1.5×ATR can no longer
-  round-trip into a loss) · **stop re-entry cooldown** (a stopped-out name can't
+  hard -18% stop · **breakeven ratchet** (a name up ≥1.5×ATR ratchets the stop
+  toward breakeven near the entry price, reducing the chance of round-trip loss
+  on ideal fills but may still incur losses due to live fills, spread, slippage,
+  or partial fills) · **stop re-entry cooldown** (a stopped-out name can't
   be re-BOUGHT for 6h — exits are never blocked — and it doesn't waste a book
   slot meanwhile) · **intraday tape shock** (SPY -1.5%/-2.5% on the day downgrades
   the regime to neutral/risk_off immediately, instead of waiting for the daily
