@@ -86,23 +86,30 @@ class MarketData:
         return self._quote_prefetch.get(t.upper())
 
     def prefetch_quotes(self, tickers: list[str]) -> int:
-        """Batch-warm quotes via TwelveData when available for intraday radar."""
-        td = self.providers.get("twelvedata")
-        fn = getattr(td, "get_quotes_batch", None) if td else None
-        if not fn or not tickers:
+        """Batch-warm quotes for the intraday radar via the first batch-capable
+        provider in the quote priority chain (Massive's filtered snapshot does
+        100 names/request with no call cap; TwelveData remains the fallback)."""
+        symbols = [t.upper() for t in tickers if t]
+        if not symbols:
             return 0
-        req = len([t for t in tickers if t])
-        try:
-            batch = fn([t.upper() for t in tickers if t])
-        except Exception as e:
-            log.warning("twelvedata batch quote prefetch failed (%d names): %s", req, e)
-            return 0
-        self._quote_prefetch.update(batch)
-        if batch:
-            log.info("prefetched %d/%d quotes via twelvedata batch", len(batch), req)
-        else:
-            log.warning("twelvedata batch prefetch returned 0/%d quotes", req)
-        return len(batch)
+        order = self._order("quote") or list(self.providers)
+        for name in order:
+            p = self.providers.get(name)
+            fn = getattr(p, "get_quotes_batch", None) if p else None
+            if fn is None:
+                continue
+            try:
+                batch = fn(symbols)
+            except Exception as e:
+                log.warning("%s batch quote prefetch failed (%d names): %s",
+                            name, len(symbols), e)
+                continue
+            if batch:
+                self._quote_prefetch.update(batch)
+                log.info("prefetched %d/%d quotes via %s batch", len(batch), len(symbols), name)
+                return len(batch)
+            log.warning("%s batch prefetch returned 0/%d quotes", name, len(symbols))
+        return 0
 
     def refresh_quotes(self, tickers: list[str], *, max_age_seconds: float = 120) -> int:
         """Re-fetch live quotes immediately before scoring so a long gather/AI pass

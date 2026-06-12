@@ -6,7 +6,6 @@ FinancialDatasets MCP server returns).
 """
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -15,7 +14,7 @@ import pandas as pd
 from ..logging_setup import get_logger
 from ..models import Quote
 from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
-                   RateLimitError, prices_to_df)
+                   RateLimitError, env_float, prices_to_df)
 
 log = get_logger("financialdatasets")
 
@@ -24,8 +23,8 @@ BASE = "https://api.financialdatasets.ai"
 # FD limits are per-minute (unlike Mboum's monthly cap) — when the primary
 # provider 429s under load, briefly stop hammering it and let the fallback
 # chain serve; a short re-probe restores it as soon as the window clears.
-RATE_LIMIT_COOLDOWN_SECONDS = float(
-    os.getenv("FINANCIALDATASETS_RATE_LIMIT_COOLDOWN_SECONDS", "60"))
+RATE_LIMIT_COOLDOWN_SECONDS = env_float(
+    "FINANCIALDATASETS_RATE_LIMIT_COOLDOWN_SECONDS", 60.0, minimum=1.0)
 
 # FinancialDatasets metric name -> our canonical fundamentals key.
 _FUND_MAP = {
@@ -74,7 +73,11 @@ class FinancialDatasetsProvider(DataProvider):
     def __init__(self, api_key: str, cache: DiskCache | None = None, *,
                  cache_ttls: dict | None = None):
         super().__init__(cache)
-        self.http = HttpClient(BASE, max_per_sec=8, default_headers={"X-API-KEY": api_key})
+        # Pace requests UNDER the plan's per-minute ceiling and the 429/Retry-After
+        # waves disappear entirely (credits are volume; the 429s are velocity).
+        # e.g. a 240/min plan -> FINANCIALDATASETS_MAX_PER_SEC=4.
+        rate = env_float("FINANCIALDATASETS_MAX_PER_SEC", 8.0, minimum=0.1)
+        self.http = HttpClient(BASE, max_per_sec=rate, default_headers={"X-API-KEY": api_key})
         self._cache_ttls = cache_ttls or {}
         self._rate_limited_until = 0.0
 

@@ -49,14 +49,19 @@ with Alpha Vantage / Twelve Data as fallbacks and unique-data fills, and
 TipRanks). Every provider is a real HTTP client; nothing is mocked. Missing data
 neutralises a factor rather than inventing a value.
 
-| Source | Used for |
+| Source | Niche it owns |
 |---|---|
-| **FinancialDatasets.AI** | prices, fundamentals, insider trades, 13F institutional, news, company facts |
-| **Mboum** | quotes, history, analyst ratings & price targets, financials, short interest, options flow |
-| **Alpha Vantage** | technicals, **news sentiment**, earnings estimates, options put/call, macro/regime, full listing universe |
-| **Twelve Data** | quote / price fallback |
+| **FinancialDatasets.AI** | depth: prices, fundamentals, insider trades, 13F institutional, news, company facts |
+| **Massive** (ex-Polygon) | volume: uncapped calls — bulk snapshot radar prefetch, deep price history, top-gainers movers, FINRA short interest, news sentiment insights, universe |
+| **Mboum** | listing universe, analyst ratings & price targets, short-interest/options backup |
+| **Alpha Vantage** | structured **news sentiment**, macro/regime (yield curve), secondary movers feed |
+| **Twelve Data** | batch-quote fallback, quote/price fallback, technicals enrichment |
 | **Firecrawl + Exa** | Zacks Rank, Morningstar, Danelfin AI score, TipRanks |
 | **Robinhood Agentic MCP** | account, positions, buying power, **order execution** |
+
+Every chain falls through on outage or quota (each paid source has a fail-fast
+rate-limit cooldown), so a single provider dying degrades data richness — never
+correctness or safety.
 
 ## Quickstart
 

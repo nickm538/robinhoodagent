@@ -26,34 +26,45 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # MANDATE ROUTING: FinancialDatasets.AI is the PRIMARY source everywhere it is
-  # capable (paid plan); Mboum (pro plan) sits right behind it and owns the
-  # sections FD lacks (listing, analyst, short interest, provider technicals).
-  # TwelveData is COMPLEMENTARY: batch quote prefetch for the intraday radar,
-  # quote/price fallback, and technicals enrichment. Alpha Vantage fills unique
-  # gaps (structured news sentiment, macro, cheap movers feed).
-  # Cost note: the radar's high-frequency quote reads are served mostly by the
-  # TwelveData batch prefetch cache; FD/Mboum are hit per-name only when the
-  # prefetch is missing or stale, which keeps FD-first routing affordable.
-  fundamentals:   ["financialdatasets", "mboum", "alphavantage"]
-  prices:         ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
-  quote:          ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
-  quote_risk:     ["financialdatasets", "mboum", "twelvedata", "alphavantage"]
-  technicals:     ["mboum", "twelvedata", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
+  # NICHE ROUTING — every source owns what it does expertly; the chains fall
+  # through on outage/quota so the system degrades gracefully, never blindly:
+  #   * FinancialDatasets (paid)  — PRIMARY for depth: fundamentals, snapshots,
+  #     insider/institutional smart-money, curated news. Per-MINUTE limited.
+  #   * Massive (paid, ex-Polygon) — VOLUME workhorse: uncapped request count.
+  #     Bulk snapshot warms the whole radar in ~4 calls, deep daily history,
+  #     top-gainers movers, FINRA short interest, news sentiment insights,
+  #     reference universe. Absorbs the per-name scan traffic that throttles FD.
+  #   * Mboum (pro)               — listing, analyst ratings, options/short backup.
+  #     Monthly-capped: cooldown auto-benches it when the cap trips.
+  #   * TwelveData (paid)         — complementary: batch-quote fallback, price/
+  #     quote fallback, indicator enrichment. Per-minute credits.
+  #   * Alpha Vantage             — unique gaps: structured news sentiment,
+  #     macro/yield curve, secondary movers feed.
+  # Cost note: the radar's high-frequency quote reads are served by the batch
+  # prefetch cache (Massive first, TwelveData fallback); FD is hit per-name only
+  # when the prefetch is missing or stale, which keeps FD-first routing affordable.
+  fundamentals:   ["financialdatasets", "mboum", "massive", "alphavantage"]  # massive serves company facts/market-cap fallback
+  prices:         ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
+  quote:          ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
+  quote_risk:     ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
+  technicals:     ["mboum", "twelvedata", "massive", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
   insider:        ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (720m TTL)
   institutional:  ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "financialdatasets", "web"]  # AV first (structured scores); Mboum has no sentiment endpoint; web opt-in last resort
-  news_headlines: ["financialdatasets", "alphavantage", "web"]           # FD news primary; AV enriches; web only adds AI context
+  news_sentiment: ["alphavantage", "financialdatasets", "massive", "web"]  # AV first (structured scores); massive insights backup; web opt-in last resort
+  news_headlines: ["financialdatasets", "massive", "alphavantage", "web"]  # FD news primary; massive/AV enrich; web only adds AI context
   analyst_ratings: ["mboum"]
-  short_interest: ["mboum"]
+  short_interest: ["massive", "mboum"]  # massive FINRA feed primary (mboum monthly-capped)
   options_flow:   ["alphavantage", "mboum"]
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
   macro:          ["alphavantage"]
-  # Universe/discovery: mboum (pro) paginated listing for the base set; Alpha
-  # Vantage TOP_GAINERS_LOSERS for the intraday movers feed (FD/mboum have no
-  # movers endpoint).
-  universe:       ["mboum", "twelvedata", "alphavantage"]
-  movers:         ["alphavantage", "twelvedata"]
+  # Universe/discovery: mboum (pro) paginated listing for the base set with
+  # massive's reference tickers right behind; movers = massive top-gainers
+  # snapshot first, AV TOP_GAINERS_LOSERS + TD as merge-fallbacks.
+  universe:       ["mboum", "massive", "twelvedata", "alphavantage"]
+  movers:         ["massive", "alphavantage", "twelvedata"]
+  # Massive pacing (requests/sec). Paid plans are call-uncapped; this only
+  # shapes burst politeness. Env override: MASSIVE_MAX_PER_SEC.
+  massive_max_per_sec: 20
   # TwelveData paid-plan tuning. Check your dashboard and set
   # TWELVEDATA_MAX_PER_SEC or this value below your plan's request/sec limit.
   twelvedata_max_per_sec: 8

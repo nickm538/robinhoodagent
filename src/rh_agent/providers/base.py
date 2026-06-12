@@ -29,6 +29,29 @@ class ProviderUnsupported(Exception):
     """Raised when a provider does not implement a requested data section."""
 
 
+def env_float(name: str, default: float, minimum: float | None = None) -> float:
+    """Parse a numeric env var defensively.
+
+    A 24/7 daemon must never be prevented from STARTING by a malformed `.env`
+    line (empty value, stray text) — invalid or out-of-range values log a
+    warning and fall back to the default instead of raising at import or
+    provider-construction time.
+    """
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return float(default)
+    try:
+        val = float(str(raw).strip())
+    except (TypeError, ValueError):
+        log.warning("env %s=%r is not numeric — using default %s", name, raw, default)
+        return float(default)
+    if minimum is not None and val < minimum:
+        log.warning("env %s=%s below minimum %s — using default %s",
+                    name, val, minimum, default)
+        return float(default)
+    return val
+
+
 class ProviderError(Exception):
     pass
 

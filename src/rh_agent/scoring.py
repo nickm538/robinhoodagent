@@ -92,11 +92,12 @@ class Scorer:
         RH_MIN_PILLARS) — useful when fewer data pillars are wired in a given
         environment, so the multi-pillar requirement scales to what is live.
         """
-        import os
-        min_conf = float(os.getenv("RH_MIN_CONVICTION",
-                                   self.cfg.get("portfolio.min_conviction_score", 60.0)))
-        min_pillars = int(float(os.getenv("RH_MIN_PILLARS",
-                                          self.norm.get("min_pillars_passing", 3))))
+        from .providers.base import env_float
+        min_conf = env_float("RH_MIN_CONVICTION",
+                             float(self.cfg.get("portfolio.min_conviction_score", 60.0)))
+        min_pillars = int(env_float("RH_MIN_PILLARS",
+                                    float(self.norm.get("min_pillars_passing", 3)),
+                                    minimum=0.0))
         rc = self.cfg.get("portfolio.risk_controls", {}) or {}
         block_ai = bool(rc.get("block_ai_caution", True))
         raw_earnings_days = rc.get("block_earnings_within_days", 2)

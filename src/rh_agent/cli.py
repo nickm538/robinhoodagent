@@ -31,7 +31,8 @@ def cmd_doctor(args) -> int:
     cfg = load_config(args.config)
     print("== rh-agent doctor ==")
     print("\nAPI keys present:")
-    for p in ["financialdatasets", "mboum", "alphavantage", "twelvedata", "firecrawl", "exa"]:
+    for p in ["financialdatasets", "massive", "mboum", "alphavantage", "twelvedata",
+              "firecrawl", "exa"]:
         print(f"  {p:18} {'✓' if cfg.api_key(p) else '— (missing)'}")
     rh_tok = cfg.robinhood_token()
     src = "env token" if rh_tok else None
@@ -45,16 +46,21 @@ def cmd_doctor(args) -> int:
     print(f"  robinhood token    {f'✓ ({src})' if rh_tok else '— (run: rh-agent auth)'}")
     print(f"\nExecution mode: {cfg.execution_mode}  |  live armed: {cfg.live_trading_armed}")
     print("\nDirect egress (needs your environment's network policy to allow these hosts):")
-    hosts = {"financialdatasets": ("https://api.financialdatasets.ai", None),
-             "mboum": ("https://api.mboum.com", None),
-             "alphavantage": ("https://www.alphavantage.co", None),
-             "twelvedata": ("https://api.twelvedata.com/quote",
-                            {"symbol": "AAPL", "apikey": cfg.api_key("twelvedata") or "demo"}),
-             "firecrawl": ("https://api.firecrawl.dev", None),
-             "robinhood": (cfg.robinhood_url(), None)}
-    for name, (url, params) in hosts.items():
+    mv_key = cfg.api_key("massive")
+    # Massive auth goes in the Bearer header — NEVER as a query param, which
+    # leaks keys into proxy/access logs. 200 = key valid; 401 = reachable, no key.
+    hosts = {"financialdatasets": ("https://api.financialdatasets.ai", None, None),
+             "massive": ("https://api.massive.com/v1/marketstatus/now", None,
+                         {"Authorization": f"Bearer {mv_key}"} if mv_key else None),
+             "mboum": ("https://api.mboum.com", None, None),
+             "alphavantage": ("https://www.alphavantage.co", None, None),
+             "twelvedata": ("https://api.twelvedata.com/quote", {"symbol": "AAPL"},
+                            {"Authorization": f"apikey {cfg.api_key('twelvedata') or 'demo'}"}),
+             "firecrawl": ("https://api.firecrawl.dev", None, None),
+             "robinhood": (cfg.robinhood_url(), None, None)}
+    for name, (url, params, headers) in hosts.items():
         try:
-            r = requests.get(url, params=params, timeout=6)
+            r = requests.get(url, params=params, headers=headers, timeout=6)
             print(f"  {name:18} HTTP {r.status_code}")
         except Exception as e:
             print(f"  {name:18} unreachable ({type(e).__name__})")

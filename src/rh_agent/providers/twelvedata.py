@@ -13,7 +13,7 @@ import pandas as pd
 from ..models import Quote
 from ..logging_setup import get_logger
 from .base import (DataProvider, DiskCache, HttpClient, ProviderUnsupported,
-                   RateLimitError, prices_to_df)
+                   RateLimitError, env_float, prices_to_df)
 
 BASE = "https://api.twelvedata.com"
 _BATCH_CHUNK = 60
@@ -43,18 +43,18 @@ class TwelveDataProvider(DataProvider):
         super().__init__(cache)
         self.api_key = api_key
         rate = max_per_sec
-        if rate is None:
-            rate = float(os.getenv("TWELVEDATA_MAX_PER_SEC", "8"))
+        if rate is None or rate <= 0:
+            rate = env_float("TWELVEDATA_MAX_PER_SEC", 8.0, minimum=0.1)
         self.http = HttpClient(BASE, max_per_sec=rate)
         # Adaptive batch size: shrinks and stays shrunk if the plan rejects a
         # large comma-separated /quote request.
-        self._batch_size = int(os.getenv("TWELVEDATA_BATCH_SIZE", _BATCH_CHUNK))
+        self._batch_size = int(env_float("TWELVEDATA_BATCH_SIZE", float(_BATCH_CHUNK),
+                                         minimum=1.0))
         self.enable_market_movers = enable_market_movers or os.getenv(
             "TWELVEDATA_ENABLE_MARKET_MOVERS", ""
         ).lower() in ("1", "true", "yes")
-        self.rate_limit_cooldown_seconds = float(
-            os.getenv("TWELVEDATA_RATE_LIMIT_COOLDOWN_SECONDS", "300")
-        )
+        self.rate_limit_cooldown_seconds = env_float(
+            "TWELVEDATA_RATE_LIMIT_COOLDOWN_SECONDS", 300.0, minimum=1.0)
         self._rate_limited_until = 0.0
 
     def _rate_limit_active(self) -> bool:
