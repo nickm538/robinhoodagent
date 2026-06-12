@@ -131,7 +131,8 @@ class TradingAgent:
 
     # ---- scan & score ----
     def scan(self, equity: float | None = None, limit: int | None = None,
-             tickers: list[str] | None = None, include_tickers: list[str] | None = None) -> ScanResult:
+             tickers: list[str] | None = None, include_tickers: list[str] | None = None,
+             exclude_tickers: set[str] | None = None) -> ScanResult:
         if equity is None:                 # 0.0 is a valid (empty-account) sizing -> keep it
             equity = self.default_equity()
         names = self.universe(limit, watchlist=tickers, include_tickers=include_tickers)
@@ -179,6 +180,14 @@ class TradingAgent:
         td_map = {td.ticker: td for td in data}
         ai_read = self._apply_ai_overlay(verdicts, td_map, regime)
         eligible = self.scorer.eligible(verdicts)
+        if exclude_tickers:
+            # Names under a re-entry cooldown must not consume a book slot — drop
+            # them BEFORE construction so the next-best name backfills the book.
+            before = len(eligible)
+            eligible = [v for v in eligible if v.ticker not in exclude_tickers]
+            if len(eligible) != before:
+                log.info("scan: excluded %d cooled-down name(s) from the book",
+                         before - len(eligible))
         targets = self.builder.build(eligible, td_map, regime, equity)
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
                           equity=equity, universe_size=full_n, scored_size=len(data),
@@ -388,6 +397,7 @@ class TradingAgent:
 
     def reconcile_and_execute(self, scan: ScanResult, *, execute: bool = False,
                               allow_buys: bool = True, exclude_tickers: set[str] | None = None,
+                              exclude_buy_tickers: set[str] | None = None,
                               broker=None, account: Account | None = None,
                               equity: float | None = None) -> RunResult:
         """Turn a (possibly pre-computed, off-thread) scan into orders and execute.
@@ -413,7 +423,7 @@ class TradingAgent:
         order_notes: list = []
         orders = build_orders(account, scan.targets, self.cfg, self.price_fn,
                               allow_buys=allow_buys, exclude_tickers=exclude_tickers,
-                              explain=order_notes)
+                              exclude_buys=exclude_buy_tickers, explain=order_notes)
 
         live = self.cfg.live_trading_armed and broker.supports_live
         # dry_run gates only the LIVE brokerage. The paper broker always

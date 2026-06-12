@@ -207,6 +207,13 @@ regime:
     neutral: 0.85
     risk_off: 0.50
     high_volatility: 0.60
+  # Intraday tape shock: daily-bar regime detection is blind to a violent selloff
+  # happening TODAY. On the live SPY day move the regime is downgraded (never
+  # upgraded) so new buying de-risks immediately instead of at the next close.
+  intraday:
+    enabled: true
+    spy_drop_neutral_pct: -1.5    # SPY day change <= -1.5% caps regime at neutral
+    spy_drop_risk_off_pct: -2.5   # <= -2.5% forces risk_off (exposure cut to 50%)
 
 # ----------------------------------------------------------------------
 # NORMALIZATION / NOISE CONTROL  — robust cross-sectional scoring.

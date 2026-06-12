@@ -221,11 +221,19 @@ On your own server/VPS there is no such restriction.
 * **Defense in depth:** paper `.env.example` default · explicit live opt-in ·
   pre-execution quote refresh · order acceptance checks · `cancel-open` · Robinhood's
   separate Agentic account · per-name (10%) and per-sector (35%) caps · ATR
-  trailing stops · hard -18% stop · **breakeven ratchet** (a name up ≥1.5×ATR can
-  no longer round-trip into a loss) · **stop re-entry cooldown** (a stopped-out
-  name can't be re-bought for 6h — kills the buy→stop→re-buy churn loop) ·
-  stale-scan expiry (never trade yesterday's conviction at the open) · daily
-  drawdown halt · liquidity floor (no penny stocks / illiquid names).
+  trailing stops (monotonic — a rebalance can never lower a ratcheted stop) ·
+  hard -18% stop · **breakeven ratchet** (a name up ≥1.5×ATR can no longer
+  round-trip into a loss) · **stop re-entry cooldown** (a stopped-out name can't
+  be re-BOUGHT for 6h — exits are never blocked — and it doesn't waste a book
+  slot meanwhile) · **intraday tape shock** (SPY -1.5%/-2.5% on the day downgrades
+  the regime to neutral/risk_off immediately, instead of waiting for the daily
+  bar) · stale-scan expiry (never trade yesterday's conviction at the open) ·
+  daily drawdown halt · liquidity floor (no penny stocks / illiquid names).
+* **Provider quota resilience:** when a data provider exhausts its plan (e.g.
+  Mboum's monthly call cap), it trips a cooldown (re-probes hourly,
+  `MBOUM_RATE_LIMIT_COOLDOWN_SECONDS` to tune) instead of burning a doomed HTTP
+  round trip per name per scan; the priority chain serves from the remaining
+  providers and the cooled provider resumes automatically when its quota resets.
 * **Not investment advice.** You are responsible for your account.
 
 ## Configuration

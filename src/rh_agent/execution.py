@@ -17,7 +17,11 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
                  price_fn: Callable[[str], float | None], *,
                  allow_buys: bool = True,
                  exclude_tickers: set[str] | None = None,
+                 exclude_buys: set[str] | None = None,
                  explain: list | None = None) -> list[Order]:
+    """exclude_tickers suppresses BOTH sides (unresolved protective orders must
+    not be double-traded); exclude_buys suppresses buys only (re-entry cooldowns
+    must never block an exit)."""
     equity = account.equity or 0.0
     if equity <= 0:
         return []
@@ -34,6 +38,7 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
             explain.append({"ticker": ticker, "action": action, "detail": detail})
 
     exclude = exclude_tickers or set()
+    no_buy = (exclude_buys or set()) | exclude
     cur = account.position_map()
     tmap = {t.ticker: t for t in targets}
     orders: list[Order] = []
@@ -41,7 +46,7 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     # --- exits & trims (sells) ---
     for tk, pos in cur.items():
         if tk in exclude:
-            note(tk, "excluded", "pending risk order or re-entry cooldown")
+            note(tk, "excluded", "unresolved protective order")
             continue
         px = price_fn(tk) or pos.current_price or pos.avg_price
         cur_w = (pos.quantity * px) / equity if px else 0.0
@@ -62,9 +67,9 @@ def build_orders(account: Account, targets: list[TargetPosition], cfg: Config,
     if not allow_buys and tmap:
         note("*", "buys_halted", "daily drawdown halt or sell-only cycle")
     for tk, t in tmap.items():
-        if tk in exclude:
+        if tk in no_buy:
             if tk not in cur:
-                note(tk, "excluded", "pending risk order or re-entry cooldown")
+                note(tk, "excluded", "protective order pending or re-entry cooldown")
             continue
         if not allow_buys:
             continue

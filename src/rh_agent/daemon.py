@@ -134,6 +134,15 @@ class AlwaysOnAgent:
         self.journal = Journal(self.cfg)
 
     # -- cadence --
+    def _interval_seconds(self) -> float:
+        sched = self.cfg.get("portfolio.rebalance.schedule", "hourly")
+        if sched == "hourly":
+            return 3600.0
+        if sched == "intraday":
+            return float(self.cfg.get("portfolio.rebalance.intraday_hours", 2)) * 3600.0
+        days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(sched, 1 / 24)
+        return days * 86400.0
+
     def _due_for_rebalance(self, now: datetime) -> bool:
         if not self.state.last_rebalance:
             return True
@@ -141,15 +150,7 @@ class AlwaysOnAgent:
             last = datetime.fromisoformat(self.state.last_rebalance)
         except ValueError:
             return True
-        elapsed = (now - last).total_seconds()
-        sched = self.cfg.get("portfolio.rebalance.schedule", "hourly")
-        if sched == "hourly":
-            return elapsed >= 3600
-        if sched == "intraday":
-            hours = float(self.cfg.get("portfolio.rebalance.intraday_hours", 2))
-            return elapsed >= hours * 3600
-        days = {"daily": 1, "weekly": 7, "biweekly": 14, "monthly": 30}.get(sched, 1 / 24)
-        return elapsed >= days * 86400
+        return (now - last).total_seconds() >= self._interval_seconds()
 
     def _ensure_stops_for_held(self, broker, account) -> None:
         """On boot / each tick, every held name gets a stop if none is recorded."""
@@ -245,9 +246,10 @@ class AlwaysOnAgent:
 
         # 1) risk management on open positions — EVERY tick, never blocked by a scan
         risk_actions = self._manage_risk(broker, account, execute)
-        # Exclude both unresolved protective sells and cooled-down stop-outs from
-        # this cycle's rebalance orders.
-        pending = set(self.state.pending_risk.keys()) | self._active_cooldowns(now)
+        # Unresolved protective sells block BOTH order sides; re-entry cooldowns
+        # block re-buys only (an exit must never be suppressed by a cooldown).
+        pending = set(self.state.pending_risk.keys())
+        cooldowns = self._active_cooldowns(now)
         due_for_rebalance = self._due_for_rebalance(now)
 
         # 2) harvest a finished background scan, or abandon a stuck one (watchdog)
@@ -329,7 +331,7 @@ class AlwaysOnAgent:
             self._pending_scan_at = None
             run = self.agent.reconcile_and_execute(
                 scan, execute=execute, allow_buys=not halted, exclude_tickers=pending,
-                broker=broker, account=account)
+                exclude_buy_tickers=cooldowns, broker=broker, account=account)
             self._apply_rebalance_result(run, account, now=now)
             self.activity.record(
                 "rebalance", orders=len(run.orders),
@@ -345,9 +347,11 @@ class AlwaysOnAgent:
                 else self.agent.default_equity()
             held = [p.ticker for p in account.positions]
             log.info("rebalance due — scanning in background (allow_buys=%s)", not halted)
-            self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held)
+            self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held,
+                                                       set(cooldowns))
             self._scan_started_at = now
-            self.activity.record("scan_started", held=len(held), equity=round(equity, 2))
+            self.activity.record("scan_started", held=len(held), equity=round(equity, 2),
+                                 cooldowns=sorted(cooldowns) or None)
         else:
             log.info("monitoring %d positions (next rebalance pending)", len(account.positions))
 
@@ -361,10 +365,8 @@ class AlwaysOnAgent:
             last = self.state.last_rebalance
             next_due = "now"
             if last:
-                sched = self.cfg.get("portfolio.rebalance.schedule", "hourly")
-                hours = float(self.cfg.get("portfolio.rebalance.intraday_hours", 2)) \
-                    if sched == "intraday" else (1.0 if sched == "hourly" else 24.0)
-                remain = hours * 3600 - (now - datetime.fromisoformat(last)).total_seconds()
+                remain = self._interval_seconds() \
+                    - (now - datetime.fromisoformat(last)).total_seconds()
                 next_due = f"{max(remain, 0) / 60:.0f}m"
             scanning = ""
             if self._scan_started_at is not None:
@@ -385,18 +387,23 @@ class AlwaysOnAgent:
     def _mode(self) -> str:
         return "live" if self.cfg.live_trading_armed else "paper"
 
-    def _safe_scan(self, equity: float, held: list[str]):
+    def _safe_scan(self, equity: float, held: list[str], exclude: set[str] | None = None):
         """Background worker: the slow scan only (data + AI). No broker, no state."""
         scan_agent = TradingAgent(
             self.cfg,
             snapshot_path=getattr(self, "_snapshot_path", None),
         )
-        return scan_agent.scan(equity=equity, include_tickers=held)
+        return scan_agent.scan(equity=equity, include_tickers=held,
+                               exclude_tickers=set(exclude or ()))
 
     def _apply_rebalance_result(self, run, account, *, now: datetime | None = None) -> None:
         for tp in run.scan.targets:
             if tp.stop_price:
-                self.state.stops[tp.ticker] = tp.stop_price
+                # Stops are monotonic for a held name: a rebalance recomputing from
+                # the current price must never undo a breakeven/trailing ratchet.
+                prev = self.state.stops.get(tp.ticker)
+                self.state.stops[tp.ticker] = max(prev, tp.stop_price) if prev \
+                    else tp.stop_price
             if tp.take_profit:
                 self.state.take_profits[tp.ticker] = tp.take_profit
             if tp.ticker not in self.state.high_water:
