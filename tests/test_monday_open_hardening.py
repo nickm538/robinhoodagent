@@ -87,6 +87,48 @@ def test_harvest_discards_scan_finished_over_the_weekend(tmp_path, monkeypatch):
     assert d.state.last_scan_seconds == 0.0                  # stale run never pollutes cadence stats
 
 
+def test_stale_discard_rekicks_fresh_hunt_same_tick(tmp_path, monkeypatch):
+    """After discarding a stale harvest, the kick block (an elif of the
+    PENDING-execution `if`, not of the harvest block) still runs in the SAME
+    tick — Monday 09:30 discards Friday's scan and immediately hunts fresh."""
+    import rh_agent.daemon as daemon
+
+    d = _mk_daemon(tmp_path, monkeypatch)
+    monkeypatch.setattr(daemon, "minutes_to_close", lambda now=None: None)
+
+    class _Agent:
+        providers = {}
+
+        def clear_price_cache(self):
+            pass
+
+        def make_broker(self):
+            return _Broker()
+
+        def default_equity(self):
+            return 1000.0
+
+        def reconcile_and_execute(self, *a, **k):
+            raise AssertionError("stale Friday scan must not execute")
+
+    d.agent = _Agent()
+    d._scan_future = SimpleNamespace(done=lambda: True, result=lambda: "stale-scan")
+    d._scan_started_at = _utcnow() - timedelta(hours=65)
+    d._pending_scan = None
+    d._pending_scan_at = None
+    d._pending_scan_expiry = 3600.0
+    d._scan_pool = MagicMock()
+    d._ensure_stops_for_held = lambda *a, **k: None
+    d._manage_risk = lambda *a, **k: set()
+    d._due_for_rebalance = lambda now: True          # Monday open: long overdue
+
+    d.tick(execute=True)
+
+    d._scan_pool.submit.assert_called_once()         # fresh hunt, same tick
+    events = [e["event"] for e in d.activity.tail()]
+    assert "scan_expired" in events and "scan_started" in events
+
+
 def test_harvest_keeps_fresh_scan(tmp_path, monkeypatch):
     d = _mk_daemon(tmp_path, monkeypatch)
     reconciled = {"n": 0}

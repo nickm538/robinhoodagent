@@ -41,6 +41,13 @@ from .risk import atr_stop, breakeven_stop, take_profit, trailing_stop
 log = get_logger("daemon")
 STATE = REPO_ROOT / "state" / "daemon_state.json"
 
+# Split-guard discriminator: a stored stop towering this far over BOTH the live
+# price and the broker's (split-adjusted) average cost is a price-scale mismatch
+# from a corporate action, not a crash (a real crash keeps avg cost at the
+# stop's scale). 1.8 catches 2:1 and larger splits while staying well clear of
+# any plausible ATR-stop distance.
+SPLIT_GUARD_RATIO = 1.8
+
 
 @dataclass
 class DaemonState:
@@ -361,7 +368,10 @@ class AlwaysOnAgent:
             # Pre-close blackout: a hunt kicked now would still be computing at
             # the bell, idle overnight, and beg to fire stale at the next open.
             # The risk loop (stops/TPs) keeps running every tick regardless.
-            blackout = float(self.cfg.get("daemon.scan_blackout_minutes_before_close", 15))
+            try:
+                blackout = float(self.cfg.get("daemon.scan_blackout_minutes_before_close", 15))
+            except (TypeError, ValueError):
+                blackout = 15.0
             mtc = minutes_to_close(now)
             if (blackout > 0 and mtc is not None and mtc < blackout
                     and "snapshot" not in getattr(self.agent, "providers", {})):
@@ -491,7 +501,7 @@ class AlwaysOnAgent:
             # scale as the stop. Re-anchor instead of selling.
             avg = float(pos.avg_price or 0)
             if (stop and px and avg > 0
-                    and stop / px >= 1.8 and stop / avg >= 1.8):
+                    and stop / px >= SPLIT_GUARD_RATIO and stop / avg >= SPLIT_GUARD_RATIO):
                 atr = None
                 try:
                     td = self.agent.md.build(tk, deep=False)
