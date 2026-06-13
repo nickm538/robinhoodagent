@@ -89,6 +89,18 @@ def is_market_open(now_utc: datetime | None = None) -> bool:
     return open_m <= minutes <= close_m
 
 
+def minutes_to_close(now_utc: datetime | None = None) -> float | None:
+    """Minutes until today's closing bell; None when the market is closed.
+    Clamped at 0.0 — is_market_open works at minute granularity, so the final
+    sub-minute sliver of the session must not surface as a negative value."""
+    now = now_utc or datetime.now(timezone.utc)
+    if not is_market_open(now):
+        return None
+    et = to_eastern(now)
+    close_m = 13 * 60 if et.strftime("%Y-%m-%d") in _EARLY_CLOSE else 16 * 60
+    return max(0.0, close_m - (et.hour * 60 + et.minute + et.second / 60.0))
+
+
 def session_state(now_utc: datetime | None = None) -> dict:
     """Session snapshot for diagnostics: phase + ET clock + tz source."""
     et = to_eastern(now_utc)

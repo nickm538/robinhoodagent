@@ -440,6 +440,9 @@ def test_daemon_runs_scan_in_background_then_executes(tmp_path, monkeypatch):
             return scan_result
 
     monkeypatch.setattr(daemon, "TradingAgent", _ScanAgent)
+    # Neutralize the pre-close blackout (None = "not near a close") so the
+    # test is deterministic regardless of the wall-clock time it runs at.
+    monkeypatch.setattr(daemon, "minutes_to_close", lambda now=None: None)
     d.agent = _Agent()
     d._ensure_stops_for_held = lambda *a, **k: None
     d._manage_risk = lambda *a, **k: set()

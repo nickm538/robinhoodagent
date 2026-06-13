@@ -33,13 +33,20 @@ from .broker.orders import order_succeeded
 from .config import REPO_ROOT, Config, write_private
 from .journal import Journal
 from .logging_setup import get_logger
-from .market_calendar import is_market_open, to_eastern
+from .market_calendar import is_market_open, minutes_to_close, to_eastern
 from .models import Order
 from .process_lock import ProcessLockError, daemon_lock
-from .risk import atr_stop, breakeven_stop, trailing_stop
+from .risk import atr_stop, breakeven_stop, take_profit, trailing_stop
 
 log = get_logger("daemon")
 STATE = REPO_ROOT / "state" / "daemon_state.json"
+
+# Split-guard discriminator: a stored stop towering this far over BOTH the live
+# price and the broker's (split-adjusted) average cost is a price-scale mismatch
+# from a corporate action, not a crash (a real crash keeps avg cost at the
+# stop's scale). 1.8 catches 2:1 and larger splits while staying well clear of
+# any plausible ATR-stop distance.
+SPLIT_GUARD_RATIO = 1.8
 
 
 @dataclass
@@ -258,23 +265,38 @@ class AlwaysOnAgent:
                         if self._scan_started_at else 0.0)
             if self._scan_future.done():
                 try:
-                    self._pending_scan = self._scan_future.result()
-                    self._pending_scan_at = now
-                    self.state.last_scan_seconds = round(scan_age, 1)
-                    s = self._pending_scan
-                    self.activity.record(
-                        "scan_done", seconds=round(scan_age, 1),
-                        universe=getattr(s, "universe_size", None),
-                        scored=getattr(s, "scored_size", None),
-                        eligible=len(getattr(s, "eligible", []) or []),
-                        targets=len(getattr(s, "targets", []) or []),
-                        regime=getattr(getattr(s, "regime", None), "name", None))
+                    result = self._scan_future.result()
                 except Exception as e:
                     log.error("background scan failed: %s", e, exc_info=True)
                     self.activity.record("scan_failed", seconds=round(scan_age, 1),
                                          error=str(e)[:300])
                     self._pending_scan = None
                     self._pending_scan_at = None
+                else:
+                    if scan_age > self._pending_scan_expiry:
+                        # The worker finished while the loop was idle (a hunt that
+                        # straddled the close keeps computing after the bell, then
+                        # waits overnight/all weekend for the next tick). Trading
+                        # the next open on that conviction is the classic "mystery
+                        # trade at 9:30" — discard it; a fresh hunt starts now.
+                        log.warning("scan finished but is %.0fs old (> expiry %.0fs) — "
+                                    "discarding stale conviction; hunting fresh",
+                                    scan_age, self._pending_scan_expiry)
+                        self.activity.record("scan_expired", age_seconds=round(scan_age, 1),
+                                             at="harvest")
+                        self._pending_scan = None
+                        self._pending_scan_at = None
+                    else:
+                        self._pending_scan = result
+                        self._pending_scan_at = now
+                        self.state.last_scan_seconds = round(scan_age, 1)
+                        self.activity.record(
+                            "scan_done", seconds=round(scan_age, 1),
+                            universe=getattr(result, "universe_size", None),
+                            scored=getattr(result, "scored_size", None),
+                            eligible=len(getattr(result, "eligible", []) or []),
+                            targets=len(getattr(result, "targets", []) or []),
+                            regime=getattr(getattr(result, "regime", None), "name", None))
                 self._scan_future = None
                 self._scan_started_at = None
             elif scan_age > self._scan_timeout:
@@ -343,15 +365,28 @@ class AlwaysOnAgent:
         # 4) otherwise, kick off a new scan when due (and none is in flight/pending)
         elif (due_for_rebalance and self._scan_future is None
               and self._pending_scan is None and not risk_actions):
-            equity = account.equity if (account.equity and account.equity > 0) \
-                else self.agent.default_equity()
-            held = [p.ticker for p in account.positions]
-            log.info("rebalance due — scanning in background (allow_buys=%s)", not halted)
-            self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held,
-                                                       set(cooldowns))
-            self._scan_started_at = now
-            self.activity.record("scan_started", held=len(held), equity=round(equity, 2),
-                                 cooldowns=sorted(cooldowns) or None)
+            # Pre-close blackout: a hunt kicked now would still be computing at
+            # the bell, idle overnight, and beg to fire stale at the next open.
+            # The risk loop (stops/TPs) keeps running every tick regardless.
+            try:
+                blackout = float(self.cfg.get("daemon.scan_blackout_minutes_before_close", 15))
+            except (TypeError, ValueError):
+                blackout = 15.0
+            mtc = minutes_to_close(now)
+            if (blackout > 0 and mtc is not None and mtc < blackout
+                    and "snapshot" not in getattr(self.agent, "providers", {})):
+                log.info("%.0fm to the close (< %.0fm blackout) — no new hunt this late; "
+                         "risk management continues", mtc, blackout)
+            else:
+                equity = account.equity if (account.equity and account.equity > 0) \
+                    else self.agent.default_equity()
+                held = [p.ticker for p in account.positions]
+                log.info("rebalance due — scanning in background (allow_buys=%s)", not halted)
+                self._scan_future = self._scan_pool.submit(self._safe_scan, equity, held,
+                                                           set(cooldowns))
+                self._scan_started_at = now
+                self.activity.record("scan_started", held=len(held), equity=round(equity, 2),
+                                     cooldowns=sorted(cooldowns) or None)
         else:
             log.info("monitoring %d positions (next rebalance pending)", len(account.positions))
 
@@ -457,6 +492,36 @@ class AlwaysOnAgent:
             self.state.high_water[tk] = hw
             stop = self.state.stops.get(tk)
             tp = self.state.take_profits.get(tk)
+            # Corporate-action guard: a stock split leaves price-absolute stop/TP/
+            # high-water state at the OLD scale, so the post-split quote looks like
+            # a catastrophic crash and falsely stop-sells the position (observed
+            # live: KLAC 10:1). Discriminator: after a split the broker's average
+            # cost is split-adjusted too, so the stored stop towers over BOTH the
+            # live price and avg cost. In a real crash avg cost stays at the same
+            # scale as the stop. Re-anchor instead of selling.
+            avg = float(pos.avg_price or 0)
+            if (stop and px and avg > 0
+                    and stop / px >= SPLIT_GUARD_RATIO and stop / avg >= SPLIT_GUARD_RATIO):
+                atr = None
+                try:
+                    td = self.agent.md.build(tk, deep=False)
+                    atr = td.technicals.get("atr") if td else None
+                except Exception:
+                    pass
+                new_stop = atr_stop(px, atr, atr_mult, hard_pct)
+                new_tp = take_profit(px, atr, float(rc.get("take_profit_atr_mult", 6.0)))
+                log.warning("corporate action suspected on %s (stop %.2f vs px %.2f, "
+                            "avg cost %.2f) — re-anchoring stop to %.2f instead of selling",
+                            tk, stop, px, avg, new_stop)
+                self.activity.record("risk", kind="split_guard", ticker=tk,
+                                     old_stop=stop, new_stop=new_stop, price=round(px, 4))
+                self.state.stops[tk] = new_stop
+                self.state.high_water[tk] = px
+                if new_tp:
+                    self.state.take_profits[tk] = new_tp
+                else:
+                    self.state.take_profits.pop(tk, None)
+                continue
             if stop and px <= stop:
                 log.warning("STOP hit %s @ %.2f (stop %.2f) — selling", tk, px, stop)
                 res = broker.place_order(
