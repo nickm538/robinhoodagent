@@ -79,7 +79,7 @@ def _parse_redirect(pasted: str) -> tuple[str | None, str | None]:
     Headless hosts (browser-based SSH, no port-forward) can't receive the
     localhost callback, so the operator approves in their own browser, copies
     the address bar — which the browser failed to load but still shows the
-    ``...localhost:8765/callback?code=...&state=...`` query — and pastes it back.
+    ``...localhost:<port>/callback?code=...&state=...`` query — and pastes it back.
     A bare code (no URL) is accepted too, though the full URL preserves the
     state check.
     """
@@ -103,10 +103,10 @@ def _parse_redirect(pasted: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-async def _manual_callback():
+async def _manual_callback(port: int = 8765):
     """Read the redirected URL from stdin instead of catching it on a socket."""
     loop = asyncio.get_event_loop()
-    print("\nAfter you approve, the browser will try to open a 'localhost:8765' page")
+    print(f"\nAfter you approve, the browser will try to open a 'localhost:{port}' page")
     print("that FAILS to load — that is expected on a headless VM. Copy the FULL")
     print("address from the browser's address bar and paste it here.\n")
     while True:
@@ -176,7 +176,7 @@ def make_provider(server_url: str, port: int = 8765, interactive: bool = True,
 
     async def callback_handler():
         if manual:
-            return await _manual_callback()
+            return await _manual_callback(port)
         if not interactive:
             raise RuntimeError("Robinhood token expired and cannot refresh non-interactively; "
                                "re-run `rh-agent auth`.")
