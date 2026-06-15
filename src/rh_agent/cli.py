@@ -32,7 +32,7 @@ def cmd_doctor(args) -> int:
     print("== rh-agent doctor ==")
     print("\nAPI keys present:")
     for p in ["financialdatasets", "massive", "mboum", "alphavantage", "twelvedata",
-              "firecrawl", "exa"]:
+              "finnhub", "firecrawl", "exa"]:
         print(f"  {p:18} {'✓' if cfg.api_key(p) else '— (missing)'}")
     rh_tok = cfg.robinhood_token()
     src = "env token" if rh_tok else None
@@ -56,6 +56,8 @@ def cmd_doctor(args) -> int:
              "alphavantage": ("https://www.alphavantage.co", None, None),
              "twelvedata": ("https://api.twelvedata.com/quote", {"symbol": "AAPL"},
                             {"Authorization": f"apikey {cfg.api_key('twelvedata') or 'demo'}"}),
+             "finnhub": ("https://finnhub.io/api/v1/quote", {"symbol": "AAPL"},
+                         {"X-Finnhub-Token": cfg.api_key("finnhub") or "demo"}),
              "firecrawl": ("https://api.firecrawl.dev", None, None),
              "robinhood": (cfg.robinhood_url(), None, None)}
     for name, (url, params, headers) in hosts.items():
