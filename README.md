@@ -214,7 +214,7 @@ network egress policy (see https://code.claude.com/docs/en/claude-code-on-the-we
 
 ```
 api.financialdatasets.ai   api.mboum.com   www.alphavantage.co
-api.twelvedata.com   api.firecrawl.dev   api.exa.ai   agent.robinhood.com
+api.twelvedata.com   finnhub.io   api.firecrawl.dev   api.exa.ai   agent.robinhood.com
 ```
 
 On your own server/VPS there is no such restriction.

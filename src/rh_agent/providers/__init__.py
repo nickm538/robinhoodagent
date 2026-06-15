@@ -65,10 +65,13 @@ def build_providers(cfg: Config, snapshot_path: str | None = None) -> dict[str, 
     fh_key = cfg.api_key("finnhub")
     if fh_key:
         from .finnhub import FinnhubProvider
-        providers["finnhub"] = FinnhubProvider(
-            fh_key, cache,
-            max_per_sec=_cfg_float(cfg.get("providers.finnhub_max_per_sec", 0), 0) or None,
+        import os
+        # If FINNHUB_MAX_PER_SEC env var is set, pass None to let the provider use it;
+        # otherwise fall back to config value
+        fh_rate = None if os.getenv("FINNHUB_MAX_PER_SEC") else (
+            _cfg_float(cfg.get("providers.finnhub_max_per_sec", 0), 0) or None
         )
+        providers["finnhub"] = FinnhubProvider(fh_key, cache, max_per_sec=fh_rate)
 
     fc_key, exa_key = cfg.api_key("firecrawl"), cfg.api_key("exa")
     if fc_key or exa_key:
