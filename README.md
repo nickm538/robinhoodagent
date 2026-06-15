@@ -56,6 +56,7 @@ neutralises a factor rather than inventing a value.
 | **Mboum** | listing universe, analyst ratings & price targets, short-interest/options backup |
 | **Alpha Vantage** | structured **news sentiment**, macro/regime (yield curve), secondary movers feed |
 | **Twelve Data** | batch-quote fallback, quote/price fallback, technicals enrichment |
+| **Finnhub** (free) | last-resort safety net: quote/company/insider/headlines backup; **restores analyst ratings** when Mboum is quota-capped |
 | **Firecrawl + Exa** | Zacks Rank, Morningstar, Danelfin AI score, TipRanks |
 | **Robinhood Agentic MCP** | account, positions, buying power, **order execution** |
 
@@ -213,7 +214,7 @@ network egress policy (see https://code.claude.com/docs/en/claude-code-on-the-we
 
 ```
 api.financialdatasets.ai   api.mboum.com   www.alphavantage.co
-api.twelvedata.com   api.firecrawl.dev   api.exa.ai   agent.robinhood.com
+api.twelvedata.com   finnhub.io   api.firecrawl.dev   api.exa.ai   agent.robinhood.com
 ```
 
 On your own server/VPS there is no such restriction.

@@ -32,7 +32,7 @@ def cmd_doctor(args) -> int:
     print("== rh-agent doctor ==")
     print("\nAPI keys present:")
     for p in ["financialdatasets", "massive", "mboum", "alphavantage", "twelvedata",
-              "firecrawl", "exa"]:
+              "finnhub", "firecrawl", "exa"]:
         print(f"  {p:18} {'✓' if cfg.api_key(p) else '— (missing)'}")
     rh_tok = cfg.robinhood_token()
     src = "env token" if rh_tok else None
@@ -56,6 +56,8 @@ def cmd_doctor(args) -> int:
              "alphavantage": ("https://www.alphavantage.co", None, None),
              "twelvedata": ("https://api.twelvedata.com/quote", {"symbol": "AAPL"},
                             {"Authorization": f"apikey {cfg.api_key('twelvedata') or 'demo'}"}),
+             "finnhub": ("https://finnhub.io/api/v1/quote", {"symbol": "AAPL"},
+                         {"X-Finnhub-Token": cfg.api_key("finnhub") or "demo"}),
              "firecrawl": ("https://api.firecrawl.dev", None, None),
              "robinhood": (cfg.robinhood_url(), None, None)}
     for name, (url, params, headers) in hosts.items():
@@ -171,14 +173,24 @@ def cmd_backtest(args) -> int:
 
 
 def cmd_auth(args) -> int:
-    """One-time Robinhood OAuth for the standalone bot (opens a browser)."""
+    """One-time Robinhood OAuth for the standalone bot.
+
+    Default opens a localhost callback server (browser on the same machine).
+    ``--manual`` instead prints the URL and prompts you to paste the redirected
+    URL back — for headless hosts (Cloud Console browser SSH, no port-forward).
+    """
     cfg = load_config(args.config)
     from .broker.oauth import authenticate
     url = cfg.robinhood_url()
+    manual = bool(getattr(args, "manual", False))
     print(f"Authenticating with Robinhood Agentic MCP at {url}")
-    print("A browser window will open — approve access, then return here.\n")
+    if manual:
+        print("Manual mode: open the printed URL in any browser, approve, then paste"
+              " the redirected (failed-to-load) URL back here.\n")
+    else:
+        print("A browser window will open — approve access, then return here.\n")
     try:
-        tools = authenticate(url, port=args.port)
+        tools = authenticate(url, port=args.port, manual=manual)
     except Exception as e:
         print(f"Auth failed: {e}")
         return 1
@@ -246,6 +258,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("auth", help="one-time Robinhood OAuth for the standalone bot")
     s.add_argument("--port", type=int, default=8765, help="localhost OAuth callback port")
+    s.add_argument("--manual", action="store_true",
+                   help="headless flow: print URL, paste the redirected URL back "
+                        "(no localhost callback / port-forward needed)")
     s.set_defaults(func=cmd_auth)
 
     sub.add_parser("probe", help="read-only dump of Robinhood MCP tool schemas").set_defaults(

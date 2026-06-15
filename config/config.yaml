@@ -40,19 +40,23 @@ providers:
   #     quote fallback, indicator enrichment. Per-minute credits.
   #   * Alpha Vantage             — unique gaps: structured news sentiment,
   #     macro/yield curve, secondary movers feed.
+  #   * Finnhub (free)            — last-resort SAFETY NET: quote/company/insider/
+  #     headlines backup, and RESTORES analyst ratings while Mboum is quota-capped
+  #     (free recommendation-trends). Not in prices/technicals (no free candles)
+  #     and no fundamentals ratios (percent-vs-fraction unit risk) — company only.
   # Cost note: the radar's high-frequency quote reads are served by the batch
   # prefetch cache (Massive first, TwelveData fallback); FD is hit per-name only
   # when the prefetch is missing or stale, which keeps FD-first routing affordable.
-  fundamentals:   ["financialdatasets", "mboum", "massive", "alphavantage"]  # massive serves company facts/market-cap fallback
+  fundamentals:   ["financialdatasets", "mboum", "massive", "finnhub", "alphavantage"]  # massive+finnhub serve company facts/market-cap + earnings fallback
   prices:         ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
-  quote:          ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
-  quote_risk:     ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
+  quote:          ["financialdatasets", "massive", "mboum", "twelvedata", "finnhub", "alphavantage"]
+  quote_risk:     ["financialdatasets", "massive", "mboum", "twelvedata", "finnhub", "alphavantage"]
   technicals:     ["mboum", "twelvedata", "massive", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
-  insider:        ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (720m TTL)
+  insider:        ["financialdatasets", "mboum", "finnhub"]   # FD primary; finnhub free backup keeps smart-money alive
   institutional:  ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (1440m TTL)
   news_sentiment: ["alphavantage", "financialdatasets", "massive", "web"]  # AV first (structured scores); massive insights backup; web opt-in last resort
-  news_headlines: ["financialdatasets", "massive", "alphavantage", "web"]  # FD news primary; massive/AV enrich; web only adds AI context
-  analyst_ratings: ["mboum"]
+  news_headlines: ["financialdatasets", "massive", "alphavantage", "finnhub", "web"]  # FD news primary; massive/AV/finnhub enrich; web only adds AI context
+  analyst_ratings: ["mboum", "finnhub"]   # finnhub recommendation-trends RESTORE ratings while mboum quota is capped
   short_interest: ["massive", "mboum"]  # massive FINRA feed primary (mboum monthly-capped)
   options_flow:   ["alphavantage", "mboum"]
   pro_scores:     ["web"]         # Zacks / Morningstar / Danelfin / TipRanks via web research
@@ -60,11 +64,13 @@ providers:
   # Universe/discovery: mboum (pro) paginated listing for the base set with
   # massive's reference tickers right behind; movers = massive top-gainers
   # snapshot first, AV TOP_GAINERS_LOSERS + TD as merge-fallbacks.
-  universe:       ["mboum", "massive", "twelvedata", "alphavantage"]
+  universe:       ["mboum", "massive", "twelvedata", "alphavantage", "finnhub"]
   movers:         ["massive", "alphavantage", "twelvedata"]
   # Massive pacing (requests/sec). Paid plans are call-uncapped; this only
   # shapes burst politeness. Env override: MASSIVE_MAX_PER_SEC.
   massive_max_per_sec: 20
+  # Finnhub free tier is ~60 calls/min — pace at 1/sec. Env: FINNHUB_MAX_PER_SEC.
+  finnhub_max_per_sec: 1
   # TwelveData paid-plan tuning. Check your dashboard and set
   # TWELVEDATA_MAX_PER_SEC or this value below your plan's request/sec limit.
   twelvedata_max_per_sec: 8
