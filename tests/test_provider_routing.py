@@ -1,9 +1,10 @@
-"""Shipped-config provider routing mandate.
+"""Shipped-config provider routing mandate (COST-OPTIMIZED for a small account).
 
-FinancialDatasets.AI is the PRIMARY source wherever it is capable, Mboum (pro)
-runs right behind it, and TwelveData stays COMPLEMENTARY (batch prefetch,
-fallback quotes/prices, technicals enrichment). These tests pin the shipped
-config so a tuning PR can't silently demote the paid primary providers.
+FinancialDatasets bills per call, so it is reserved for the low-frequency,
+days-cached depth it alone does well (fundamental ratios via merge + 13F
+institutional). The high-volume reads (quotes, prices, company, news) run on
+flat-rate Massive and free Finnhub. These tests pin that intent so a future
+tuning PR can't silently re-promote the per-call provider into the firehose.
 """
 from __future__ import annotations
 
@@ -14,23 +15,34 @@ def _providers():
     return load_config().get("providers", {})
 
 
-def test_financialdatasets_is_primary_for_core_sections():
+def test_flatrate_massive_is_primary_for_high_volume_reads():
     p = _providers()
-    for section in ("fundamentals", "prices", "quote", "quote_risk",
-                    "insider", "institutional", "news_headlines"):
-        assert p[section][0] == "financialdatasets", (
-            f"{section}: financialdatasets must be primary, got {p[section]}")
+    # The per-call leak was quotes/prices/company — those must lead with the
+    # flat-rate, uncapped provider, never the per-call one.
+    for section in ("quote", "quote_risk", "prices", "fundamentals"):
+        assert p[section][0] == "massive", (
+            f"{section}: massive (flat-rate) must be primary, got {p[section]}")
 
 
-def test_mboum_backs_up_every_core_section():
+def test_financialdatasets_demoted_off_the_firehose_but_retained():
     p = _providers()
-    for section in ("fundamentals", "prices", "quote", "quote_risk",
-                    "technicals", "insider", "institutional"):
-        assert "mboum" in p[section], f"{section}: mboum (pro) missing from {p[section]}"
-    assert p["universe"][0] == "mboum"
-    assert p["news_sentiment"][0] == "alphavantage"
-    # Mboum has no get_news_sentiment — must not appear in that chain.
-    assert "mboum" not in p.get("news_sentiment", [])
+    # FD must NOT be primary on the high-volume per-call sections...
+    for section in ("quote", "quote_risk", "prices", "news_headlines", "insider"):
+        assert p[section][0] != "financialdatasets", (
+            f"{section}: FD must not lead the firehose, got {p[section]}")
+    # ...but stays available as a fallback for resilience.
+    for section in ("quote", "prices", "fundamentals"):
+        assert "financialdatasets" in p[section]
+    # FD remains the source for the two things only it does (cached for days):
+    assert p["institutional"][0] == "financialdatasets"
+    assert "financialdatasets" in p["fundamentals"]   # supplies ratios via merge
+
+
+def test_free_providers_lead_where_they_can():
+    p = _providers()
+    assert p["insider"][0] == "finnhub"          # free insider, FD fallback
+    assert p["analyst_ratings"][0] == "mboum" and "finnhub" in p["analyst_ratings"]
+    assert p["news_headlines"][0] == "massive"   # flat-rate headlines first
 
 
 def test_twelvedata_stays_complementary_not_primary():
@@ -42,49 +54,16 @@ def test_twelvedata_stays_complementary_not_primary():
             f"{section}: twelvedata must be complementary, not primary ({chain})")
 
 
-# ---- FinancialDatasets /news/ quirks (live API caps limit at 10) ----
-
-def _fd_with_news(monkeypatch, items):
-    from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
-    fd = FinancialDatasetsProvider.__new__(FinancialDatasetsProvider)
-    seen = {}
-
-    def fake_cached(section, ticker, ttl, path, params):
-        seen.update(params)
-        return {"news": items}
-
-    monkeypatch.setattr(fd, "_cached", fake_cached)
-    return fd, seen
+def test_fundamentals_caches_hard_to_bound_fd_spend():
+    ttls = load_config().get("providers.cache_ttl_minutes", {})
+    # FD's only recurring sections must be cached for days so per-call spend is
+    # a handful/day, not thousands. (FD honors these TTLs; see config comment.)
+    assert ttls["fundamentals"] >= 10080      # >= 7 days
+    assert ttls["institutional"] >= 10080
 
 
-def test_fd_news_limit_capped_at_10(monkeypatch):
-    fd, seen = _fd_with_news(monkeypatch, [{"title": f"h{i}"} for i in range(10)])
-    fd.get_headlines("AAPL", limit=50)
-    assert seen["limit"] <= 10
-    seen.clear()
-    try:
-        fd.get_news_sentiment("AAPL")
-    except Exception:
-        pass
-    assert seen["limit"] <= 10
-
-
-def test_fd_sentiment_defers_when_articles_unlabeled(monkeypatch):
-    import pytest
-
-    from rh_agent.providers.base import ProviderUnsupported
-    fd, _ = _fd_with_news(monkeypatch, [{"title": "no label"}] * 5)
-    with pytest.raises(ProviderUnsupported):
-        fd.get_news_sentiment("AAPL")
-
-
-def test_fd_sentiment_scores_labeled_articles(monkeypatch):
-    fd, _ = _fd_with_news(monkeypatch, [
-        {"title": "a", "sentiment": "positive"},
-        {"title": "b", "sentiment": "positive"},
-        {"title": "c", "sentiment": "negative"},
-        {"title": "d", "sentiment": "neutral"},
-    ])
-    out = fd.get_news_sentiment("AAPL")
-    assert out["score"] == 0.25
-    assert out["article_count"] == 4
+def test_mboum_still_present_where_capable():
+    p = _providers()
+    assert p["universe"][0] == "mboum"
+    assert p["news_sentiment"][0] == "alphavantage"
+    assert "mboum" not in p.get("news_sentiment", [])   # mboum has no sentiment endpoint

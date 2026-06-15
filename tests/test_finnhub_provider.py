@@ -211,6 +211,10 @@ def test_routing_keeps_finnhub_out_of_prices_and_backs_analyst():
     assert "finnhub" not in p["prices"]          # no free candles -> never a price source
     assert "finnhub" not in p["technicals"]
     assert "finnhub" in p["analyst_ratings"] and p["analyst_ratings"][0] == "mboum"
+    assert p["insider"][0] == "finnhub"          # free insider leads, FD fallback
     for section in ("quote", "quote_risk", "insider", "news_headlines"):
         assert "finnhub" in p[section]
-        assert p[section][-1] in ("finnhub", "alphavantage", "web")  # always a late fallback
+    # FD must sit BEHIND a free/flat provider everywhere finnhub helps (cost)
+    for section in ("quote", "quote_risk", "insider", "news_headlines"):
+        if "financialdatasets" in p[section]:
+            assert p[section].index("finnhub") < p[section].index("financialdatasets")
