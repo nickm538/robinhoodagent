@@ -62,6 +62,20 @@ def test_fundamentals_caches_hard_to_bound_fd_spend():
     assert ttls["institutional"] >= 10080
 
 
+def test_fd_news_limit_is_capped_at_10(monkeypatch):
+    from rh_agent.providers.financial_datasets import FinancialDatasetsProvider
+
+    fd = FinancialDatasetsProvider.__new__(FinancialDatasetsProvider)
+    seen = {}
+
+    def fake_cached(section, ticker, ttl, path, params):
+        seen.update(params)
+        return {"news": [{"title": "h"}] * 10}
+
+    monkeypatch.setattr(fd, "_cached", fake_cached)
+    fd.get_headlines("AAPL", limit=50)
+    assert seen["limit"] <= 10
+
 def test_mboum_still_present_where_capable():
     p = _providers()
     assert p["universe"][0] == "mboum"
