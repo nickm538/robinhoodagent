@@ -26,36 +26,32 @@ execution:
 # are prioritized per mandate.
 # ----------------------------------------------------------------------
 providers:
-  # NICHE ROUTING — every source owns what it does expertly; the chains fall
-  # through on outage/quota so the system degrades gracefully, never blindly:
-  #   * FinancialDatasets (paid)  — PRIMARY for depth: fundamentals, snapshots,
-  #     insider/institutional smart-money, curated news. Per-MINUTE limited.
-  #   * Massive (paid, ex-Polygon) — VOLUME workhorse: uncapped request count.
-  #     Bulk snapshot warms the whole radar in ~4 calls, deep daily history,
-  #     top-gainers movers, FINRA short interest, news sentiment insights,
-  #     reference universe. Absorbs the per-name scan traffic that throttles FD.
-  #   * Mboum (pro)               — listing, analyst ratings, options/short backup.
-  #     Monthly-capped: cooldown auto-benches it when the cap trips.
-  #   * TwelveData (paid)         — complementary: batch-quote fallback, price/
-  #     quote fallback, indicator enrichment. Per-minute credits.
-  #   * Alpha Vantage             — unique gaps: structured news sentiment,
-  #     macro/yield curve, secondary movers feed.
-  #   * Finnhub (free)            — last-resort SAFETY NET: quote/company/insider/
-  #     headlines backup, and RESTORES analyst ratings while Mboum is quota-capped
-  #     (free recommendation-trends). Not in prices/technicals (no free candles)
-  #     and no fundamentals ratios (percent-vs-fraction unit risk) — company only.
-  # Cost note: the radar's high-frequency quote reads are served by the batch
-  # prefetch cache (Massive first, TwelveData fallback); FD is hit per-name only
-  # when the prefetch is missing or stale, which keeps FD-first routing affordable.
-  fundamentals:   ["financialdatasets", "mboum", "massive", "finnhub", "alphavantage"]  # massive+finnhub serve company facts/market-cap + earnings fallback
-  prices:         ["financialdatasets", "massive", "mboum", "twelvedata", "alphavantage"]
-  quote:          ["financialdatasets", "massive", "mboum", "twelvedata", "finnhub", "alphavantage"]
-  quote_risk:     ["financialdatasets", "massive", "mboum", "twelvedata", "finnhub", "alphavantage"]
+  # COST-OPTIMIZED ROUTING (small real-money account). FinancialDatasets bills
+  # PER CALL (~$0.02) and was the primary firehose for quotes/prices/company —
+  # thousands of billable calls/day, wildly disproportionate to the account. So
+  # FD is now DEMOTED to a narrow, long-cached source and the high-volume reads
+  # run on flat-rate / free providers:
+  #   * Massive (paid, FLAT-RATE, uncapped) — PRIMARY for the volume: quote
+  #     (bulk snapshot), prices (aggregates), company facts (SIC sector),
+  #     news, movers, short interest, universe. Cost per extra call = $0.
+  #   * Finnhub (FREE) — analyst ratings (Mboum gap), insider, earnings, company/
+  #     news fallback. ~60/min, so it's a fallback for the highest-volume reads.
+  #   * TwelveData (paid, per-minute) — quote/price fallback + technicals.
+  #   * Alpha Vantage — structured news sentiment, macro/yield curve, movers.
+  #   * FinancialDatasets (paid, PER-CALL) — reserved for what only it does well:
+  #     curated fundamental RATIOS (via merge) + 13F institutional, both cached
+  #     for DAYS (quarterly data) so it's hit a handful of times/day, not thousands.
+  #     Kept as a late fallback elsewhere for resilience, rarely exercised.
+  #   * Mboum (pro) — listing/analyst; monthly-quota-capped (cooldown benches it).
+  fundamentals:   ["massive", "finnhub", "financialdatasets", "mboum", "alphavantage"]  # company=massive(free sector), earnings=finnhub(free), RATIOS=FD via merge (7d cache)
+  prices:         ["massive", "twelvedata", "financialdatasets", "mboum", "alphavantage"]  # Massive aggregates (flat) primary; FD demoted to fallback
+  quote:          ["massive", "twelvedata", "finnhub", "financialdatasets", "alphavantage"]  # Massive bulk snapshot (flat) primary; FD last-resort
+  quote_risk:     ["massive", "twelvedata", "finnhub", "financialdatasets", "alphavantage"]  # freshness gate falls through if a quote is stale, so risk stays real-time
   technicals:     ["mboum", "twelvedata", "massive", "alphavantage"]   # computed locally first; provider values enrich gaps (FD has no technicals endpoint)
-  insider:        ["financialdatasets", "mboum", "finnhub"]   # FD primary; finnhub free backup keeps smart-money alive
-  institutional:  ["financialdatasets", "mboum"]   # FD primary: lower-frequency smart-money (1440m TTL)
-  news_sentiment: ["alphavantage", "financialdatasets", "massive", "web"]  # AV first (structured scores); massive insights backup; web opt-in last resort
-  news_headlines: ["financialdatasets", "massive", "alphavantage", "finnhub", "web"]  # FD news primary; massive/AV/finnhub enrich; web only adds AI context
+  insider:        ["finnhub", "financialdatasets", "mboum"]   # Finnhub FREE primary; FD fallback only
+  institutional:  ["financialdatasets", "mboum"]   # FD-unique 13F; cached 7d -> a few calls/day
+  news_sentiment: ["alphavantage", "massive", "financialdatasets", "web"]  # AV structured scores; massive insights; FD last
+  news_headlines: ["massive", "finnhub", "alphavantage", "financialdatasets", "web"]  # FD demoted to late fallback
   analyst_ratings: ["mboum", "finnhub"]   # finnhub recommendation-trends RESTORE ratings while mboum quota is capped
   short_interest: ["massive", "mboum"]  # massive FINRA feed primary (mboum monthly-capped)
   options_flow:   ["alphavantage", "mboum"]
@@ -84,12 +80,12 @@ providers:
   # and FinancialDatasetsProvider._ttl; other providers still use module defaults until wired.
   cache_ttl_minutes:
     quote: 3
-    prices: 720
-    fundamentals: 1440
-    insider: 720
-    institutional: 1440
+    prices: 1440          # daily bars change once/day — was 720
+    fundamentals: 10080   # 7d: quarterly data; slashes FD financial-metrics/company calls (was 1440)
+    insider: 1440         # was 720
+    institutional: 10080  # 7d: 13F is quarterly (was 1440)
     news_sentiment: 120
-    analyst_ratings: 720
+    analyst_ratings: 1440  # was 720
     macro: 720
     pro_scores: 720
 

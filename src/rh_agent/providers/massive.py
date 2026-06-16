@@ -213,9 +213,15 @@ class MassiveProvider(DataProvider):
         res = (d or {}).get("results") or {}
         if not res:
             raise ProviderUnsupported
+        # Massive/Polygon reference has no GICS sector — only SIC. Use the SIC
+        # description for BOTH sector and industry so company facts can route here
+        # (flat-rate) and still drive the portfolio's sector-concentration cap with
+        # a consistent grouping (every Massive-sourced name buckets the same way).
+        sic = res.get("sic_description")
         return {
             "name": res.get("name"),
-            "industry": res.get("sic_description"),
+            "sector": sic,
+            "industry": sic,
             "market_cap": _num(res.get("market_cap")),
             "exchange": res.get("primary_exchange"),
             "employees": res.get("total_employees"),

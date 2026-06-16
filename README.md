@@ -41,18 +41,20 @@ universe → live data providers → 27 factors → winsorised cross-sectional r
         → vol-targeted sizing (per-name & sector caps, ATR stops) → broker (paper/live)
 ```
 
-## Data sources (priority order)
+## Data sources (cost-optimized routing)
 
-**FinancialDatasets.AI** and **Mboum** are the primary sources (per mandate),
-with Alpha Vantage / Twelve Data as fallbacks and unique-data fills, and
-**Firecrawl + Exa** for pro-source web research (Zacks / Morningstar / Danelfin /
-TipRanks). Every provider is a real HTTP client; nothing is mocked. Missing data
-neutralises a factor rather than inventing a value.
+Routing is tuned so a small account isn't bled by **per-call** API fees. The
+high-volume reads (quotes, prices, company facts, news) run on **flat-rate
+Massive** and **free Finnhub**; the **per-call FinancialDatasets** plan is
+reserved for the low-frequency depth only it does well (fundamental ratios, 13F
+institutional), cached for days so it's hit a handful of times daily, not
+thousands. Every provider is a real HTTP client; nothing is mocked, and missing
+data neutralises a factor rather than inventing a value.
 
 | Source | Niche it owns |
 |---|---|
-| **FinancialDatasets.AI** | depth: prices, fundamentals, insider trades, 13F institutional, news, company facts |
-| **Massive** (ex-Polygon) | volume: uncapped calls — bulk snapshot radar prefetch, deep price history, top-gainers movers, FINRA short interest, news sentiment insights, universe |
+| **Massive** (ex-Polygon, flat-rate) | the volume workhorse — bulk snapshot quotes, deep price history, company facts (SIC sector), news, top-gainers movers, FINRA short interest, universe |
+| **FinancialDatasets.AI** (per-call) | reserved depth: curated fundamental ratios + 13F institutional, cached for days to bound spend |
 | **Mboum** | listing universe, analyst ratings & price targets, short-interest/options backup |
 | **Alpha Vantage** | structured **news sentiment**, macro/regime (yield curve), secondary movers feed |
 | **Twelve Data** | batch-quote fallback, quote/price fallback, technicals enrichment |

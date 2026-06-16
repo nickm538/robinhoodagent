@@ -149,6 +149,9 @@ def test_company_facts_with_shares_outstanding():
     assert c["market_cap"] == pytest.approx(3.1e12)
     assert c["shares_outstanding"] == pytest.approx(15e9)
     assert c["industry"] == "Electronic Computers"
+    # SIC description doubles as sector so company can route here (flat-rate)
+    # and still drive the portfolio sector cap with a consistent grouping.
+    assert c["sector"] == "Electronic Computers"
 
 
 # --------------------------------------------------------------------- news
@@ -355,13 +358,12 @@ def test_build_providers_wires_massive_from_env(monkeypatch):
 
 def test_niche_routing_config_pins():
     p = load_config().get("providers", {})
-    # Massive owns movers + short interest; backs up the heavy per-name sections.
+    # Massive owns movers + short interest, and is now the flat-rate PRIMARY for
+    # the high-volume per-call sections (the cost-optimization).
     assert p["movers"][0] == "massive"
     assert p["short_interest"][0] == "massive"
-    for section in ("prices", "quote", "quote_risk", "news_headlines",
-                    "news_sentiment", "universe", "technicals", "fundamentals"):
+    for section in ("prices", "quote", "quote_risk", "fundamentals"):
+        assert p[section][0] == "massive", f"{section}: massive must lead, got {p[section]}"
+    for section in ("news_headlines", "news_sentiment", "universe", "technicals"):
         assert "massive" in p[section], f"{section}: massive missing from {p[section]}"
-    # ...without demoting the pinned primaries (also enforced in
-    # test_provider_routing.py): FD depth-first, mboum listing-first.
-    assert p["prices"][0] == "financialdatasets"
-    assert p["universe"][0] == "mboum"
+    assert p["universe"][0] == "mboum"   # listing still mboum-first
