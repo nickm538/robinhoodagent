@@ -28,8 +28,10 @@ def test_is_market_open_correct_without_zoneinfo(monkeypatch):
     # Winter session boundary: Thu 2026-01-15 14:30 UTC = 09:30 EST -> open
     assert mc.is_market_open(datetime(2026, 1, 15, 14, 30, tzinfo=timezone.utc)) is True
     assert mc.is_market_open(datetime(2026, 1, 15, 14, 29, tzinfo=timezone.utc)) is False
+    assert mc.is_market_open(datetime(2026, 1, 15, 21, 0, tzinfo=timezone.utc)) is False
     # Early close (day after Thanksgiving 2026): 12:30 ET open, 14:00 ET closed
     assert mc.is_market_open(datetime(2026, 11, 27, 17, 30, tzinfo=timezone.utc)) is True
+    assert mc.is_market_open(datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc)) is False
     assert mc.is_market_open(datetime(2026, 11, 27, 19, 0, tzinfo=timezone.utc)) is False
 
 

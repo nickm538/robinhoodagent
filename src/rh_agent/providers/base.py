@@ -56,6 +56,12 @@ class ProviderError(Exception):
     pass
 
 
+class ProviderHTTPError(ProviderError):
+    def __init__(self, message: str, *, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class RateLimitError(ProviderError):
     def __init__(self, message: str, *, retry_after_seconds: float | None = None):
         super().__init__(message)
@@ -151,6 +157,14 @@ class HttpClient:
                 return r.json()
             except RateLimitError:
                 raise
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else None
+                if status is not None and 400 <= status < 500:
+                    raise ProviderHTTPError(
+                        f"GET {url} failed (HTTP {status})", status_code=status
+                    ) from e
+                last_err = e
+                time.sleep(min(2 ** attempt, 8))
             except Exception as e:  # network / decode
                 last_err = e
                 time.sleep(min(2 ** attempt, 8))
@@ -180,6 +194,14 @@ class HttpClient:
                 return r.json()
             except RateLimitError:
                 raise
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else None
+                if status is not None and 400 <= status < 500:
+                    raise ProviderHTTPError(
+                        f"POST {url} failed (HTTP {status})", status_code=status
+                    ) from e
+                last_err = e
+                time.sleep(min(2 ** attempt, 8))
             except Exception as e:  # network / decode
                 last_err = e
                 time.sleep(min(2 ** attempt, 8))

@@ -176,9 +176,9 @@ def test_weighted_blend_no_overlap_returns_neutral():
 def test_market_open_regular_session():
     # Monday 2026-06-08, 10:00 ET -> open
     assert is_market_open(datetime(2026, 6, 8, 10, 0, tzinfo=_ET)) is True
-    # boundaries are inclusive
+    # The opening instant is included; the closing bell is not.
     assert is_market_open(datetime(2026, 6, 8, 9, 30, tzinfo=_ET)) is True
-    assert is_market_open(datetime(2026, 6, 8, 16, 0, tzinfo=_ET)) is True
+    assert is_market_open(datetime(2026, 6, 8, 16, 0, tzinfo=_ET)) is False
 
 
 def test_market_closed_outside_session():

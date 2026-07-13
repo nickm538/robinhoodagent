@@ -86,7 +86,7 @@ def is_market_open(now_utc: datetime | None = None) -> bool:
     minutes = et.hour * 60 + et.minute
     open_m = 9 * 60 + 30
     close_m = 13 * 60 if day in _EARLY_CLOSE else 16 * 60
-    return open_m <= minutes <= close_m
+    return open_m <= minutes < close_m
 
 
 def minutes_to_close(now_utc: datetime | None = None) -> float | None:
@@ -113,7 +113,7 @@ def session_state(now_utc: datetime | None = None) -> dict:
         phase = "holiday"
     elif minutes < 9 * 60 + 30:
         phase = "pre-market"
-    elif minutes <= close_m:
+    elif minutes < close_m:
         phase = "regular session" + (" (early close)" if day in _EARLY_CLOSE else "")
     else:
         phase = "after-hours"

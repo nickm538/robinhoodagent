@@ -180,8 +180,12 @@ class TradingAgent:
         verdicts = self.scorer.score(data, regime)
         self._apply_intraday_hunter_boost(verdicts, {td.ticker: td for td in data})
         td_map = {td.ticker: td for td in data}
+        # The narrative overlay may rerank or veto quantitatively eligible names,
+        # but untrusted external text must never promote a failed quant setup into
+        # the live book by itself.
+        quant_eligible = {v.ticker for v in self.scorer.eligible(verdicts)}
         ai_read = self._apply_ai_overlay(verdicts, td_map, regime)
-        eligible = self.scorer.eligible(verdicts)
+        eligible = self._eligible_with_quant_gate(verdicts, quant_eligible)
         if exclude_tickers:
             # Names under a re-entry cooldown must not consume a book slot — drop
             # them BEFORE construction so the next-best name backfills the book.
@@ -194,6 +198,10 @@ class TradingAgent:
         return ScanResult(regime=regime, verdicts=verdicts, eligible=eligible, targets=targets,
                           equity=equity, universe_size=full_n, scored_size=len(data),
                           td_map=td_map, ai_market_read=ai_read)
+
+    def _eligible_with_quant_gate(self, verdicts: list[Verdict],
+                                  quant_eligible: set[str]) -> list[Verdict]:
+        return [v for v in self.scorer.eligible(verdicts) if v.ticker in quant_eligible]
 
     def _apply_intraday_hunter_boost(self, verdicts: list[Verdict],
                                      td_map: dict[str, TickerData]) -> None:
