@@ -166,11 +166,12 @@ class AIAnalyst:
             return AIResult()
 
         views = {}
-        allowed_tickers = {
-            str(candidate.get("ticker") or "").upper()
-            for candidate in candidates[: self.max_candidates]
-            if isinstance(candidate, dict)
-        }
+        allowed_tickers = set()
+        for candidate in candidates[: self.max_candidates]:
+            if isinstance(candidate, dict):
+                ticker = str(candidate.get("ticker") or "").upper()
+                if ticker:
+                    allowed_tickers.add(ticker)
         for a in data.get("assessments", []):
             tk = (a.get("ticker") or "").upper()
             if not tk or tk not in allowed_tickers:
