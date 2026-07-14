@@ -8,7 +8,7 @@ import pytest
 
 from rh_agent.config import load_config
 from rh_agent.models import Quote
-from rh_agent.providers.base import ProviderError, ProviderUnsupported, RateLimitError
+from rh_agent.providers.base import ProviderHTTPError, ProviderUnsupported, RateLimitError
 from rh_agent.providers.massive import MassiveProvider
 
 
@@ -299,7 +299,7 @@ def test_403_marks_section_unsupported_permanently():
     class _Http:
         def get_json(self, path, params):
             calls["n"] += 1
-            raise ProviderError("GET x failed after 3 tries: 403 Client Error")
+            raise ProviderHTTPError("GET x failed (HTTP 403)", status_code=403)
 
     p.http = _Http()
     with pytest.raises(ProviderUnsupported):

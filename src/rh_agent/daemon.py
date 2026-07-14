@@ -229,6 +229,7 @@ class AlwaysOnAgent:
 
         if broker.supports_live and not account.reliable:
             log.error("live account snapshot unreliable — skipping tick entirely")
+            self.activity.record("broker_unavailable", source=account.source)
             return
 
         today = to_eastern(now).strftime("%Y-%m-%d")

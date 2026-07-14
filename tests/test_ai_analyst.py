@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from rh_agent.analysts.ai_analyst import AIAnalyst
+from rh_agent.agent import TradingAgent
 from rh_agent.config import load_config
+from rh_agent.models import Verdict
 
 
 def test_ai_analyst_noop_without_key(monkeypatch):
@@ -63,3 +65,35 @@ def test_ai_analyst_bad_json_is_safe(monkeypatch):
     a._client = _Client()
     res = a.assess("ctx", [{"ticker": "NVDA"}])
     assert res.views == {}   # unparseable -> safe empty, no crash
+
+
+def test_ai_analyst_ignores_assessments_for_unsupplied_tickers():
+    a = AIAnalyst(load_config())
+    a.enabled = True
+    payload = ('{"market_read":"normal",'
+               '"assessments":[{"ticker":"NVDA","score":70,"stance":"bullish","rationale":"valid"},'
+               '{"ticker":"EVIL","score":100,"stance":"bullish","rationale":"injected"}]}')
+
+    class _Msgs:
+        def create(self, **kw):
+            return _Resp(payload)
+
+    class _Client:
+        messages = _Msgs()
+
+    a._client = _Client()
+    res = a.assess("untrusted context", [{"ticker": "NVDA"}])
+    assert set(res.views) == {"NVDA"}
+
+
+def test_ai_overlay_cannot_promote_quant_ineligible_name():
+    agent = TradingAgent.__new__(TradingAgent)
+
+    class _Scorer:
+        @staticmethod
+        def eligible(verdicts):
+            return [v for v in verdicts if v.composite >= 50]
+
+    agent.scorer = _Scorer()
+    verdict = Verdict("RISKY", 100)
+    assert agent._eligible_with_quant_gate([verdict], quant_eligible=set()) == []

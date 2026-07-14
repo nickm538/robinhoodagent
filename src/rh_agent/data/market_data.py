@@ -47,6 +47,8 @@ class MarketData:
         self._quote_prefetch.clear()
 
     def _try(self, section: str, method: str, *args, **kw) -> Any:
+        completed = 0
+        failures: list[str] = []
         for name in self._order(section):
             p = self.providers[name]
             fn: Callable | None = getattr(p, method, None)
@@ -54,17 +56,25 @@ class MarketData:
                 continue
             try:
                 res = fn(*args, **kw)
+                completed += 1
                 if not _is_empty(res):
                     return res
             except ProviderUnsupported:
                 continue
             except Exception as e:
+                code = getattr(e, "status_code", None)
+                failures.append(f"{name}: HTTP {code}" if code else f"{name}: {type(e).__name__}")
                 log.debug("%s.%s(%s) failed: %s", name, method, args, e)
+        if failures and completed == 0:
+            log.warning("all providers failed for %s.%s (%d): %s",
+                        section, method, len(failures), "; ".join(failures[:5]))
         return None
 
     def _merge(self, section: str, method: str, *args) -> dict:
         """Fill-missing merge across providers (used for fundamentals/analyst)."""
         merged: dict = {}
+        completed = 0
+        failures: list[str] = []
         for name in self._order(section):
             p = self.providers[name]
             fn = getattr(p, method, None)
@@ -72,13 +82,22 @@ class MarketData:
                 continue
             try:
                 d = fn(*args)
-            except (ProviderUnsupported, Exception):
+                completed += 1
+            except ProviderUnsupported:
+                continue
+            except Exception as e:
+                code = getattr(e, "status_code", None)
+                failures.append(f"{name}: HTTP {code}" if code else f"{name}: {type(e).__name__}")
+                log.debug("%s.%s(%s) failed: %s", name, method, args, e)
                 continue
             if isinstance(d, dict):
                 for k, v in d.items():
                     if k != "source" and merged.get(k) in (None,) and v is not None:
                         merged[k] = v
                 merged.setdefault("sources", []).append(name)
+        if failures and completed == 0:
+            log.warning("all providers failed for %s.%s (%d): %s",
+                        section, method, len(failures), "; ".join(failures[:5]))
         return merged
 
     # ---- direct section accessors ----

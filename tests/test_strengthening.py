@@ -56,6 +56,7 @@ def test_diagnose_explains_quiet_hunts_and_scan_bound_cadence(tmp_path, monkeypa
                notes=[{"ticker": "AAA", "action": "hold_within_band", "detail": ""},
                       {"ticker": "BBB", "action": "hold_within_band", "detail": ""}])
     led.record("scan_abandoned", seconds=1801.0, timeout=1800.0)
+    led.record("broker_unavailable", source="robinhood")
     led.record("risk", kind="stop_filled", ticker="CCC", price=9.5, stop=9.6)
 
     out = diagnose(cfg, hours=24)
@@ -64,6 +65,7 @@ def test_diagnose_explains_quiet_hunts_and_scan_bound_cadence(tmp_path, monkeypa
     assert "discipline working" in out               # zero-order hunts explained
     assert "abandoned 1" in out
     assert "watchdog" in out
+    assert "broker account snapshot was unreliable" in out
     assert "CCC" in out                              # protective exit surfaced
 
 

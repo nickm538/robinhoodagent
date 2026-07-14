@@ -29,7 +29,7 @@ import pandas as pd
 
 from ..logging_setup import get_logger
 from ..models import Quote
-from .base import (DataProvider, DiskCache, HttpClient, ProviderError,
+from .base import (DataProvider, DiskCache, HttpClient, ProviderError, ProviderHTTPError,
                    ProviderUnsupported, RateLimitError, env_float, prices_to_df)
 
 log = get_logger("massive")
@@ -98,7 +98,7 @@ class MassiveProvider(DataProvider):
             raise ProviderUnsupported("massive rate limited") from e
         except ProviderError as e:
             # Plan-gated endpoint: remember and stop probing this section.
-            if "403" in str(e):
+            if isinstance(e, ProviderHTTPError) and e.status_code == 403:
                 self._unsupported.add(section)
                 log.info("massive: %s not in plan (403) — section disabled this run", section)
             raise ProviderUnsupported(str(e)) from e

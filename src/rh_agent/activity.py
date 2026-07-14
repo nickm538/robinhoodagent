@@ -123,6 +123,7 @@ def _scan_lines(events: list[dict], cfg, hours: float) -> list[str]:
     abandoned = [e for e in events if e.get("event") == "scan_abandoned"]
     failed = [e for e in events if e.get("event") == "scan_failed"]
     expired = [e for e in events if e.get("event") == "scan_expired"]
+    broker_unavailable = [e for e in events if e.get("event") == "broker_unavailable"]
     lines = [f"Hunts (last {hours:.0f}h): started {len(started)}, completed {len(done)}, "
              f"abandoned {len(abandoned)}, failed {len(failed)}, expired {len(expired)}."]
     durations = [float(e.get("seconds", 0)) for e in done if e.get("seconds")]
@@ -145,6 +146,9 @@ def _scan_lines(events: list[dict], cfg, hours: float) -> list[str]:
     if failed:
         last = failed[-1]
         lines.append(f"WARNING: last scan failure: {str(last.get('error', ''))[:140]}")
+    if broker_unavailable:
+        lines.append(f"WARNING: {len(broker_unavailable)} tick(s) skipped because the live "
+                     "broker account snapshot was unreliable. Check OAuth and connectivity.")
     if not (started or done):
         lines.append("No hunts recorded in this window — if the market was open, check the "
                      "daemon is running (systemctl status rh-agent) and logs/loop.log.")
