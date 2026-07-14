@@ -86,7 +86,8 @@ class MarketData:
             except ProviderUnsupported:
                 continue
             except Exception as e:
-                failures.append(f"{name}: {e}")
+                code = getattr(e, "status_code", None)
+                failures.append(f"{name}: HTTP {code}" if code else f"{name}: {type(e).__name__}")
                 log.debug("%s.%s(%s) failed: %s", name, method, args, e)
                 continue
             if isinstance(d, dict):
@@ -95,8 +96,8 @@ class MarketData:
                         merged[k] = v
                 merged.setdefault("sources", []).append(name)
         if failures and completed == 0:
-            log.warning("all providers failed for %s.%s: %s",
-                        section, method, "; ".join(failures))
+            log.warning("all providers failed for %s.%s (%d): %s",
+                        section, method, len(failures), "; ".join(failures[:5]))
         return merged
 
     # ---- direct section accessors ----
